@@ -1,0 +1,19 @@
+# Node
+node_modules/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+
+# Environment / secrets
+*.key
+*.key.pub
+*.pem
+*.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test (선택)
+*runeGame_test.js

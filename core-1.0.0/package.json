@@ -1,0 +1,22 @@
+{
+  "name": "@remote-kakao/core",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "license": "MIT",
+  "repository": "https://github.com/remote-kakao/core.git",
+  "scripts": {
+    "dev": "tsc --watch",
+    "build": "tsc"
+  },
+  "author": "thoratica <me@tica.fun>",
+  "devDependencies": {
+    "@types/node": "^18.0.0",
+    "nodemon": "^2.0.18",
+    "ts-node": "^10.8.1",
+    "typescript": "^4.7.4"
+  },
+  "dependencies": {
+    "eventemitter3": "^4.0.7",
+    "node-kakaolink": "^1.1.7"
+  }
+}

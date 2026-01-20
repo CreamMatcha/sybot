@@ -1,0 +1,537 @@
+{
+  "version": 1,
+  "raids": {
+    "세르카": {
+      "하드": [
+        {
+          "gate": 1,
+          "gold": 14000,
+          "moreGold": 5600,
+          "clear": [
+            {
+              "name": "가시",
+              "qty": 10
+            }
+          ],
+          "more": [
+            {
+              "name": "가시",
+              "qty": 10
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 21000,
+          "moreGold": 8480,
+          "clear": [
+            {
+              "name": "가시",
+              "qty": 15
+            }
+          ],
+          "more": [
+            {
+              "name": "가시",
+              "qty": 15
+            }
+          ]
+        }
+      ],
+      "노말": [
+        {
+          "gate": 1,
+          "gold": 17500,
+          "moreGold": 4480,
+          "clear": [],
+          "more": []
+        },
+        {
+          "gate": 2,
+          "gold": 26500,
+          "moreGold": 6720,
+          "clear": [],
+          "more": []
+        }
+      ],
+      "나이트메어": [
+        {
+          "gate": 1,
+          "gold": 21000,
+          "moreGold": 6720,
+          "clear": [
+            {
+              "name": "가시",
+              "qty": 10
+            }
+          ],
+          "more": [
+            {
+              "name": "가시",
+              "qty": 10
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 33000,
+          "moreGold": 10560,
+          "clear": [
+            {
+              "name": "가시",
+              "qty": 15
+            }
+          ],
+          "more": [
+            {
+              "name": "가시",
+              "qty": 15
+            }
+          ]
+        }
+      ]
+    },
+    "종막": {
+      "하드": [
+        {
+          "gate": 1,
+          "gold": 17000,
+          "moreGold": 5440,
+          "clear": [
+            {
+              "name": "코어",
+              "qty": 2
+            }
+          ],
+          "more": [
+            {
+              "name": "코어",
+              "qty": 2
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 35000,
+          "moreGold": 11200,
+          "clear": [
+            {
+              "name": "코어",
+              "qty": 2
+            }
+          ],
+          "more": [
+            {
+              "name": "코어",
+              "qty": 2
+            }
+          ]
+        }
+      ],
+      "노말": [
+        {
+          "gate": 1,
+          "gold": 14000,
+          "moreGold": 4480,
+          "clear": [
+            {
+              "name": "코어",
+              "qty": 1
+            }
+          ],
+          "more": [
+            {
+              "name": "코어",
+              "qty": 1
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 26000,
+          "moreGold": 8320,
+          "clear": [
+            {
+              "name": "코어",
+              "qty": 1
+            }
+          ],
+          "more": [
+            {
+              "name": "코어",
+              "qty": 1
+            }
+          ]
+        }
+      ]
+    },
+    "4막": {
+      "하드": [
+        {
+          "gate": 1,
+          "gold": 15000,
+          "moreGold": 4800,
+          "clear": [
+            {
+              "name": "코어",
+              "qty": 1
+            }
+          ],
+          "more": [
+            {
+              "name": "코어",
+              "qty": 1
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 27000,
+          "moreGold": 8640,
+          "clear": [
+            {
+              "name": "코어",
+              "qty": 1
+            }
+          ],
+          "more": [
+            {
+              "name": "코어",
+              "qty": 1
+            }
+          ]
+        }
+      ],
+      "노말": [
+        {
+          "gate": 1,
+          "gold": 12500,
+          "moreGold": 4000,
+          "clear": [
+            {
+              "name": "코어",
+              "qty": 1
+            }
+          ],
+          "more": [
+            {
+              "name": "코어",
+              "qty": 1
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 20500,
+          "moreGold": 6560,
+          "clear": [
+            {
+              "name": "코어",
+              "qty": 1
+            }
+          ],
+          "more": [
+            {
+              "name": "코어",
+              "qty": 1
+            }
+          ]
+        }
+      ]
+    },
+    "3막": {
+      "하드": [
+        {
+          "gate": 1,
+          "gold": 7000,
+          "moreGold": 2700,
+          "clear": [
+            {
+              "name": "뇌옥",
+              "qty": 3
+            }
+          ],
+          "more": [
+            {
+              "name": "뇌옥",
+              "qty": 3
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 11000,
+          "moreGold": 4100,
+          "clear": [
+            {
+              "name": "뇌옥",
+              "qty": 5
+            }
+          ],
+          "more": [
+            {
+              "name": "뇌옥",
+              "qty": 5
+            }
+          ]
+        },
+        {
+          "gate": 3,
+          "gold": 20000,
+          "moreGold": 5800,
+          "clear": [
+            {
+              "name": "뇌옥",
+              "qty": 10
+            }
+          ],
+          "more": [
+            {
+              "name": "뇌옥",
+              "qty": 10
+            }
+          ]
+        }
+      ],
+      "노말": [
+        {
+          "gate": 1,
+          "gold": 6000,
+          "moreGold": 2400,
+          "clear": [
+            {
+              "name": "뿔",
+              "qty": 3
+            }
+          ],
+          "more": [
+            {
+              "name": "뿔",
+              "qty": 3
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 9500,
+          "moreGold": 3200,
+          "clear": [
+            {
+              "name": "뿔",
+              "qty": 5
+            }
+          ],
+          "more": [
+            {
+              "name": "뿔",
+              "qty": 5
+            }
+          ]
+        },
+        {
+          "gate": 3,
+          "gold": 12500,
+          "moreGold": 4200,
+          "clear": [
+            {
+              "name": "뿔",
+              "qty": 10
+            }
+          ],
+          "more": [
+            {
+              "name": "뿔",
+              "qty": 10
+            }
+          ]
+        }
+      ]
+    },
+    "2막": {
+      "하드": [
+        {
+          "gate": 1,
+          "gold": 10000,
+          "moreGold": 4500,
+          "clear": [
+            {
+              "name": "카르마",
+              "qty": 8
+            }
+          ],
+          "more": [
+            {
+              "name": "카르마",
+              "qty": 8
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 20500,
+          "moreGold": 7200,
+          "clear": [
+            {
+              "name": "카르마",
+              "qty": 12
+            }
+          ],
+          "more": [
+            {
+              "name": "카르마",
+              "qty": 12
+            }
+          ]
+        }
+      ],
+      "노말": [
+        {
+          "gate": 1,
+          "gold": 7250,
+          "moreGold": 3240,
+          "clear": [
+            {
+              "name": "카르마",
+              "qty": 4
+            }
+          ],
+          "more": [
+            {
+              "name": "카르마",
+              "qty": 4
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 14250,
+          "moreGold": 4830,
+          "clear": [
+            {
+              "name": "카르마",
+              "qty": 6
+            }
+          ],
+          "more": [
+            {
+              "name": "카르마",
+              "qty": 6
+            }
+          ]
+        }
+      ]
+    },
+    "1막": {
+      "하드": [
+        {
+          "gate": 1,
+          "gold": 8000,
+          "moreGold": 3640,
+          "clear": [
+            {
+              "name": "쐐기돌",
+              "qty": 8
+            }
+          ],
+          "more": [
+            {
+              "name": "쐐기돌",
+              "qty": 8
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 16500,
+          "moreGold": 5880,
+          "clear": [
+            {
+              "name": "쐐기돌",
+              "qty": 12
+            }
+          ],
+          "more": [
+            {
+              "name": "쐐기돌",
+              "qty": 12
+            }
+          ]
+        }
+      ],
+      "노말": [
+        {
+          "gate": 1,
+          "gold": 4750,
+          "moreGold": 1030,
+          "clear": [
+            {
+              "name": "쐐기돌",
+              "qty": 4
+            }
+          ],
+          "more": [
+            {
+              "name": "쐐기돌",
+              "qty": 4
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 10750,
+          "moreGold": 2400,
+          "clear": [
+            {
+              "name": "쐐기돌",
+              "qty": 6
+            }
+          ],
+          "more": [
+            {
+              "name": "쐐기돌",
+              "qty": 6
+            }
+          ]
+        }
+      ]
+    },
+    "베히모스": {
+      "노말": [
+        {
+          "gate": 1,
+          "gold": 2800,
+          "moreGold": 920,
+          "clear": [
+            {
+              "name": "비늘",
+              "qty": 10
+            }
+          ],
+          "more": [
+            {
+              "name": "비늘",
+              "qty": 10
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 6000,
+          "moreGold": 1960,
+          "clear": [
+            {
+              "name": "비늘",
+              "qty": 20
+            }
+          ],
+          "more": [
+            {
+              "name": "비늘",
+              "qty": 20
+            }
+          ]
+        }
+      ]
+    }
+  }
+}
