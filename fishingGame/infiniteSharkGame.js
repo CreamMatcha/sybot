@@ -52,9 +52,9 @@ function fmtFixed(v, digits) {
 }
 
 // ─────────────────────────────────────────────
-// ✅ 무한상어게임모드 설정
+// 무한상어게임모드 설정
 // ─────────────────────────────────────────────
-const INFINITE_TRIES = true;       // ✅ 시도 제한 제거
+const INFINITE_TRIES = true;       // 시도 제한 제거
 const INF_TRIES_NUMBER = 999999;   // 내부 계산용 큰 수(표시는 ∞)
 
 // ── 동작할 방 (null이면 모든 방)
@@ -312,7 +312,7 @@ function ensureWeeklyRod(user) {
     return { rolled: false, name: d.weeklyRodName, forced: forced };
 }
 
-// ✅ 누구나 리롤(.ㄹㄹ) : “월요일에 새로 뽑는 것처럼” 현재 낚싯대를 prev로 둔 채 다시 뽑기
+// 누구나 리롤(.ㄹㄹ) : “월요일에 새로 뽑는 것처럼” 현재 낚싯대를 prev로 둔 채 다시 뽑기
 function rerollWeeklyRodLikeMonday(user) {
     ensureUser(user);
     var today = todayKST();
@@ -329,7 +329,7 @@ function getRodAdjustedParams(user) {
     var d = userData[user];
     var rod = d.weeklyRod || "none";
 
-    // ✅ 무한모드: maxTries는 고정(실제로 제한 체크는 제거했지만, 표기/계산용)
+    // 무한모드: maxTries는 고정(실제로 제한 체크는 제거했지만, 표기/계산용)
     var maxTries = INFINITE_TRIES ? INF_TRIES_NUMBER : BASE_MAX_DAILY_TRIES;
 
     var successP = BASE_SUCCESS_P;
@@ -488,7 +488,7 @@ function applyLuckyProc(size, params) {
     return { size: size, proc: false, tier: null, mul: 1.0 };
 }
 
-// ✅ 무한모드에서는 "완주" 개념이 없으니 안정 보너스 비활성
+// 무한모드에서는 "완주" 개념이 없으니 안정 보너스 비활성
 function grantSafeCompletionBonus(user, params, dayMax) {
     if (INFINITE_TRIES) return null;
 
@@ -623,7 +623,7 @@ function getTop1BestSize() {
     return max;
 }
 
-// ✅ 배틀 제외 낚시 결과에만 적용할 "랭킹 1등 기준 보정치"
+// 배틀 제외 낚시 결과에만 적용할 "랭킹 1등 기준 보정치"
 function applyTopRankCorrection(size, dayMax) {
     var top1 = getTop1BestSize();
     if (!top1 || top1 <= 0) return size;
@@ -679,11 +679,11 @@ function attemptShark(user) {
         return INFINITE_TRIES ? "∞" : String(params.maxTries - data.triesToday);
     }
 
-    // 🔹 배틀 낚싯대는 "배틀만"
+    // 배틀 낚싯대는 "배틀만"
     if (params.isBattleRod) {
         if (typeof data.battleCountToday === "undefined") data.battleCountToday = 0;
 
-        // ✅ 무한모드: 배틀 하루 2회 제한 제거
+        // 무한모드: 배틀 하루 2회 제한 제거
         var bres = resolveBattle(user);
         data.battleCountToday++;
         saveUserData();
@@ -708,13 +708,13 @@ function attemptShark(user) {
         logI("attemptShark() rod-adjusted bounds -> min=" + dayMin + ", max=" + dayMax);
     }
 
-    // ✅ 무한모드: 일일 횟수 제한 체크 제거 (여기서 막지 않음)
+    // 무한모드: 일일 횟수 제한 체크 제거 (여기서 막지 않음)
 
     // 시도 시작 직후 파손 체크
     var rollBreak = Math.random();
     logD("attemptShark() breakRoll=" + rollBreak.toFixed(3) + " thresh=" + params.breakP);
     if (rollBreak < params.breakP) {
-        // ✅ 부러짐은 연출만: 오늘 낚시 차단 없음
+        // 부러짐은 연출만: 오늘 낚시 차단 없음
         data.triesToday++;
         data.streak = 0;          // 부러지면 연속은 끊기는 게 자연스러움(원하면 제거 가능)
         saveUserData();
@@ -899,7 +899,7 @@ function attemptShark(user) {
         size = luckyInfo.size;
     }
 
-    // ✅ 랭킹 1등 기준 보정치 적용(배틀 제외)
+    // 랭킹 1등 기준 보정치 적용(배틀 제외)
     size = applyTopRankCorrection(size, dayMax);
 
     var bestUpdated = false;
@@ -949,7 +949,7 @@ function attemptShark(user) {
             luckyInfo2 = applyLuckyProc(bonusSize, params);
             bonusSize = luckyInfo2.size;
         }
-        // ✅ 랭킹 1등 기준 보정치 적용(배틀 제외)
+        // 랭킹 1등 기준 보정치 적용(배틀 제외)
         bonusSize = applyTopRankCorrection(bonusSize, dayMax);
 
         var bonusKind = "특급";
@@ -1111,7 +1111,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
     logD("MESSAGE room='" + msg.room + "', user='" + user + "', content='" + content + "' -> cmd='" + cmd + "', arg='" + arg + "'");
 
     try {
-        // ✅ (1) 누구나 낚싯대 리롤: .ㄹㄹ (낚시 자동 진행 X)
+        // (1) 누구나 낚싯대 리롤: .ㄹㄹ (낚시 자동 진행 X)
         if (cmd === ".ㄹㄹ") {
             ensureUser(user);
 
