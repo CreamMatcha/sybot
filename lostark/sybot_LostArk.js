@@ -818,13 +818,8 @@ function renderRaidBlock(raidName, diffName, gateList) {
         if (moreGold > 0) line += "(-" + formatGold(moreGold) + "G)";
         if (clearText) line += " + " + clearText;
 
-        // 관문별 더보기 보상까지 보고 싶으면 아래 2줄 주석 해제
-        // var moreText = itemsToText(g.more);
-        // if (moreText) line += " (+" + moreText + ")";
-
         lines.push(line);
     }
-    lines.push("━━━━━━━━━━━━━━");
     var totalLine = "총합: " + formatGold(sumGold) + "G";
     if (sumMoreGold > 0) totalLine += "(-" + formatGold(sumMoreGold) + "G)";
 
@@ -916,6 +911,9 @@ bot.addListener(Event.MESSAGE, function (msg) {
             for (var i = 0; i < diffs.length; i++) {
                 var d = diffs[i];
                 blocks.push(renderRaidBlock(raidName, d, raidObj[d] || []));
+                if (i < diffs.length - 1) {
+                    blocks.push("━━━━━━━━━━━━━━");
+                }
             }
             msg.reply(blocks.join("\n\n"));
             return;
