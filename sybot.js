@@ -1,5 +1,5 @@
 const bot = BotManager.getCurrentBot();
-const TARGET_ROOM = "테스트1";
+const ALLOWED_ROOMS = ["테스트1", "아크라시아인의 휴식처"];
 
 function save(originpath, content) {
     var splited_originpath = originpath.split("/");
@@ -101,9 +101,7 @@ function getRandomFood() {
 function onMessage(msg) {
     Log.i(`[Log] 메시지 수신: 방='${msg.room}', 보낸 사람='${msg.author.name}', 내용='${msg.content}'`);
 
-    if (msg.room !== TARGET_ROOM) {
-        return;
-    }
+    if (!ALLOWED_ROOMS.includes(room)) return;
 
     const content = msg.content.trim();
 

@@ -1,6 +1,6 @@
 const bot = BotManager.getCurrentBot();
 
-const TARGET_ROOM = "아크라시아인의 휴식처";
+const ALLOWED_ROOMS = ["아크라시아인의 휴식처"];
 const fishingSpots = [
     {
         name: "작은 낚시터",
@@ -141,66 +141,66 @@ function randomInRange(min, max) {
 }
 
 function simulateFishing(user) {
-  Log.d(`[SIMULATE] simulateFishing() for ${user}`);
-  const today = getTodayString();
-  if (!userData[user]) {
-    Log.d(`[SIMULATE] New user initialized: ${user}`);
-    userData[user] = { level: 1, exp: 0, biggestFish: 0, biggestFishName: "", lastFishDate: null, dailyResults: {}, fishCount: {} };
-  }
-  const data = userData[user];
+    Log.d(`[SIMULATE] simulateFishing() for ${user}`);
+    const today = getTodayString();
+    if (!userData[user]) {
+        Log.d(`[SIMULATE] New user initialized: ${user}`);
+        userData[user] = { level: 1, exp: 0, biggestFish: 0, biggestFishName: "", lastFishDate: null, dailyResults: {}, fishCount: {} };
+    }
+    const data = userData[user];
 
-  if (!data.fishCount) data.fishCount = {};
-  if (!data.fishCount[today]) data.fishCount[today] = 0;
-  if (data.fishCount[today] >= 2) {
-    Log.d(`[SIMULATE] ${user} reached today's fishing limit.`);
-    return `${user}님은 오늘 낚시를 2회 진행하셨습니다. 내일 다시 시도해주세요.`;
-  }
-
-  data.fishCount[today]++;
-  data.lastFishDate = today;
-  const level = data.level;
-  let totalExp = 0;
-  data.dailyResults = { [today]: [] }; // 이전 기록 제거
-
-  function doSingleFishing(index) {
-    const currentSpot = getPrimaryFishingSpot(level);
-    const availableSpots = getAvailableFishingSpots(level);
-    const spot = Math.random() < 0.1 && availableSpots.length > 1 ? getRandomItem(availableSpots.slice(0, -1)) : currentSpot;
-
-    let formatted, exp = 0;
-    if (Math.random() < 0.5) {
-      const item = getRandomItem(spot.items);
-      formatted = item;
-      exp = 2;
-    } else {
-      const fish = getRandomItem(spot.fishes);
-      const isSpecial = Math.random() < 0.1;
-      const size = isSpecial ? randomInRange(fish.min, fish.max * 2) : randomInRange(fish.min, fish.max);
-      formatted = `${isSpecial ? "⭐" : ""}${fish.name} (${size}cm)`;
-      exp = isSpecial ? fish.exp * 2 : fish.exp;
-
-      if (!data.biggestFish || data.biggestFish < size) {
-        data.biggestFish = size;
-        data.biggestFishName = fish.name;
-        Log.d(`[FISH] New biggest fish for ${user}: ${fish.name} (${size}cm)`);
-      }
+    if (!data.fishCount) data.fishCount = {};
+    if (!data.fishCount[today]) data.fishCount[today] = 0;
+    if (data.fishCount[today] >= 2) {
+        Log.d(`[SIMULATE] ${user} reached today's fishing limit.`);
+        return `${user}님은 오늘 낚시를 2회 진행하셨습니다. 내일 다시 시도해주세요.`;
     }
 
-    data.dailyResults[today][index] = formatted;
-    Log.d(`[SAVE] ${user} - 낚시 결과 저장 [${index}]: ${formatted}`);
-    saveUserData();
-    return exp;
-  }
+    data.fishCount[today]++;
+    data.lastFishDate = today;
+    const level = data.level;
+    let totalExp = 0;
+    data.dailyResults = { [today]: [] }; // 이전 기록 제거
 
-  totalExp += doSingleFishing(0);
-  totalExp += doSingleFishing(1);
-  totalExp += doSingleFishing(2);
+    function doSingleFishing(index) {
+        const currentSpot = getPrimaryFishingSpot(level);
+        const availableSpots = getAvailableFishingSpots(level);
+        const spot = Math.random() < 0.1 && availableSpots.length > 1 ? getRandomItem(availableSpots.slice(0, -1)) : currentSpot;
 
-  data.exp += totalExp;
-  tryLevelUp(user);
+        let formatted, exp = 0;
+        if (Math.random() < 0.5) {
+            const item = getRandomItem(spot.items);
+            formatted = item;
+            exp = 2;
+        } else {
+            const fish = getRandomItem(spot.fishes);
+            const isSpecial = Math.random() < 0.1;
+            const size = isSpecial ? randomInRange(fish.min, fish.max * 2) : randomInRange(fish.min, fish.max);
+            formatted = `${isSpecial ? "⭐" : ""}${fish.name} (${size}cm)`;
+            exp = isSpecial ? fish.exp * 2 : fish.exp;
 
-  const spotName = getPrimaryFishingSpot(data.level).name;
-  return `낚시 결과 (Lv.${data.level} - ${spotName}):\n` + data.dailyResults[today].join(", ") + `\n획득한 경험치: ${totalExp}`;
+            if (!data.biggestFish || data.biggestFish < size) {
+                data.biggestFish = size;
+                data.biggestFishName = fish.name;
+                Log.d(`[FISH] New biggest fish for ${user}: ${fish.name} (${size}cm)`);
+            }
+        }
+
+        data.dailyResults[today][index] = formatted;
+        Log.d(`[SAVE] ${user} - 낚시 결과 저장 [${index}]: ${formatted}`);
+        saveUserData();
+        return exp;
+    }
+
+    totalExp += doSingleFishing(0);
+    totalExp += doSingleFishing(1);
+    totalExp += doSingleFishing(2);
+
+    data.exp += totalExp;
+    tryLevelUp(user);
+
+    const spotName = getPrimaryFishingSpot(data.level).name;
+    return `낚시 결과 (Lv.${data.level} - ${spotName}):\n` + data.dailyResults[today].join(", ") + `\n획득한 경험치: ${totalExp}`;
 }
 
 function getLevelInfo(user) {
@@ -210,21 +210,21 @@ function getLevelInfo(user) {
 }
 
 function getRanking() {
-  const sorted = Object.keys(userData).map(user => {
-    return {
-      user: user,
-      level: userData[user].level,
-      fishSize: userData[user].biggestFish,
-      fishName: userData[user].biggestFishName || ""
-    };
-  }).sort((a, b) => b.fishSize - a.fishSize);
+    const sorted = Object.keys(userData).map(user => {
+        return {
+            user: user,
+            level: userData[user].level,
+            fishSize: userData[user].biggestFish,
+            fishName: userData[user].biggestFishName || ""
+        };
+    }).sort((a, b) => b.fishSize - a.fishSize);
 
-  let result = "🎣 낚시 랭킹 (물고기 크기 기준):\n";
-  sorted.forEach((entry, idx) => {
-    result += `${idx + 1}. ${entry.user}(${entry.level}) - ${entry.fishSize}cm${entry.fishName ? `(${entry.fishName})` : ""}\n`;
-  });
+    let result = "🎣 낚시 랭킹 (물고기 크기 기준):\n";
+    sorted.forEach((entry, idx) => {
+        result += `${idx + 1}. ${entry.user}(${entry.level}) - ${entry.fishSize}cm${entry.fishName ? `(${entry.fishName})` : ""}\n`;
+    });
 
-  return result.trim();
+    return result.trim();
 }
 
 function getFishingGuide() {
@@ -243,7 +243,7 @@ function getFishingGuide() {
 
 bot.setCommandPrefix(".");
 bot.addListener(Event.MESSAGE, function (msg) {
-    if (msg.room !== TARGET_ROOM) return;
+    if (!ALLOWED_ROOMS.includes(room)) return;
     const content = msg.content.trim();
     const user = msg.author.name;
 

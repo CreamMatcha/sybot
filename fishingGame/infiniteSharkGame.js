@@ -58,7 +58,7 @@ const INFINITE_TRIES = true;       // 시도 제한 제거
 const INF_TRIES_NUMBER = 999999;   // 내부 계산용 큰 수(표시는 ∞)
 
 // ── 동작할 방 (null이면 모든 방)
-const TARGET_ROOM = "아크라시아인의 휴식처";
+const ALLOWED_ROOMS = ["아크라시아인의 휴식처"];
 
 // ── 관리자/강제 제어 대상
 const ADMIN_NAME = "서윤";
@@ -1106,7 +1106,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
         cmd === ".ㄴㅅㅊㄱㅎ";
 
     // 일반 명령만 방 제한
-    if (!isAdminCmd && TARGET_ROOM && msg.room !== TARGET_ROOM) return;
+    if (!ALLOWED_ROOMS.includes(room)) return;
 
     logD("MESSAGE room='" + msg.room + "', user='" + user + "', content='" + content + "' -> cmd='" + cmd + "', arg='" + arg + "'");
 

@@ -26,13 +26,6 @@ var LOPEC_SERVER_BASE = "http://34.158.199.54:3100";
 var LOPEC_DEBUG = true;
 function dbg() { if (LOPEC_DEBUG) try { Log.i.apply(Log, ["[LOPEC]"].concat([].slice.call(arguments))); } catch (_) { } }
 
-function isAllowedRoom(roomName) {
-    try {
-        if (!ALLOWED_ROOMS || ALLOWED_ROOMS.length === 0) return true;
-        return ALLOWED_ROOMS.indexOf(String(roomName)) !== -1;
-    } catch (_) { return true; }
-}
-
 function httpGetUtf8(urlStr, headersObj) {
     try {
         var url = new java.net.URL(urlStr);
@@ -138,8 +131,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
     var room = msg.room || "";
     var content = (msg.content || "").trim();
 
-    if (!isAllowedRoom(room)) return;
-
+    if (!ALLOWED_ROOMS.includes(room)) return;
     // 로펙: ".ㄹㅍ 캐릭" / ".로펙 캐릭" / "ㄹㅍ 캐릭" / "로펙 캐릭"
     var mLP = content.match(/^(?:\.?ㄹㅍ|\.?로펙)\s+(\S+)$/);
     if (!mLP) return;

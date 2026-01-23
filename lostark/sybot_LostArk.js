@@ -824,7 +824,7 @@ function renderRaidBlock(raidName, diffName, gateList) {
 
         lines.push(line);
     }
-
+    lines.push("━━━━━━━━━━━━━━");
     var totalLine = "총합: " + formatGold(sumGold) + "G";
     if (sumMoreGold > 0) totalLine += "(-" + formatGold(sumMoreGold) + "G)";
 
