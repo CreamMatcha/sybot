@@ -915,7 +915,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
                     blocks.push("━━━━━━━━━━━━━━");
                 }
             }
-            msg.reply(blocks.join("\n\n"));
+            msg.reply(blocks.join("\n"));
             return;
         }
 
