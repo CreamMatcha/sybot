@@ -1,6 +1,6 @@
 /************************************************************
  * Lost Ark 캐릭터 정보 조회
- ************************************************************/
+************************************************************/
 var bot = BotManager.getCurrentBot();
 bot.setCommandPrefix("."); // 다른 파일에서 이미 설정했다면 중복 설정은 무시됨
 
@@ -27,6 +27,9 @@ function isAllowedRoom(roomName) {
 // API 키
 var LOSTARK_API_KEY = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6IktYMk40TkRDSTJ5NTA5NWpjTWk5TllqY2lyZyIsImtpZCI6IktYMk40TkRDSTJ5NTA5NWpjTWk5TllqY2lyZyJ9.eyJpc3MiOiJodHRwczovL2x1ZHkuZ2FtZS5vbnN0b3ZlLmNvbSIsImF1ZCI6Imh0dHBzOi8vbHVkeS5nYW1lLm9uc3RvdmUuY29tL3Jlc291cmNlcyIsImNsaWVudF9pZCI6IjEwMDAwMDAwMDAyNTQ2NjAifQ.E9LoI03kRumrluMGtS5G1XlIH0sRY7-xRWaa6G_-t_X5mhoeJqEsyz-aknmSFf8BbVX00S8Gl7TibmaQCwY5nbMARPLwfhJJ_kN3u1euaf0PWnr4hI-WnsSqt0fDfv5OWcXDaAaY21-lJwSSst9JhQbQlnvBB4dH9le0tl4ZSn_DWsvrHk972MSPJYZuHt3oggsnaD2_X8fDEjHpv3UDV1im7DWmCKUlSk-60I9al4OKxxOvaJCtAcz5rAOrEDj1XyrxaLwfvFF5jBVZiZygot6VjnuFdfyP0fmz2lKmzloXWekquDjL4mWLnubkSm5JkZvQbdS1vm2mVPu6_bFULA"; // 예) "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 var LOSTARK_BASE = "https://developer-lostark.game.onstove.com";
+
+// 전역 토글
+var LOA_DEBUG = true;
 
 function httpGetUtf8(urlStr, headersObj) {
     try {
@@ -189,10 +192,8 @@ function extractParadisePowerFromTooltip(tooltipStr) {
     }
 }
 
-// GET /armories/characters/{charName}/equipment → Type === "보주"의 Tooltip에서 낙원력 추출
-// 전역 토글(원하면 함수 밖에 두세요)
-var LOA_DEBUG = true;
 
+// 낙원력 추출 함수
 function fetchParadisePower(charNameRaw) {
     var charName = String(charNameRaw);
     var url = LOSTARK_BASE + "/armories/characters/" + charName + "/equipment";
@@ -249,6 +250,95 @@ function fetchParadisePower(charNameRaw) {
 
     return { ok: true, name: charName, paradisePower: pp };
 
+}
+
+// 팔찌 정보 추출 함수
+function fetchBracelet(charNameRaw) {
+    var charName = String(charNameRaw);
+    var url = LOSTARK_BASE + "/armories/characters/" + charName + "/equipment";
+
+    var t0 = java.lang.System.currentTimeMillis();
+    var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+    var dt = java.lang.System.currentTimeMillis() - t0;
+
+    if (!res.ok) {
+        Log.e("[LOA] BR HTTP FAIL code=" + res.code + " ms=" + dt + " url=" + url);
+        if (res.code === 404) return { ok: false, reason: "NOT_FOUND" };
+        return { ok: false, reason: "HTTP_" + res.code };
+    }
+
+    var body = res.text || "";
+    var arr;
+    try {
+        arr = JSON.parse(body);
+    } catch (e) {
+        Log.e("[LOA] BR JSON parse error: " + e);
+        return { ok: false, reason: "PARSE_ERROR" };
+    }
+
+    if (!arr || !arr.length) return { ok: false, reason: "NO_EQUIP" };
+
+    // Type === "팔찌" 찾기
+    var bracelet = null;
+    for (var i = 0; i < arr.length; i++) {
+        if (arr[i] && arr[i].Type === "팔찌") { bracelet = arr[i]; break; }
+    }
+    if (!bracelet) return { ok: false, reason: "NO_BRACELET" };
+
+    try {
+        var tooltip = JSON.parse(bracelet.Tooltip);
+        var effectText = "";
+
+        // Tooltip 내에서 "팔찌 효과" 섹션 찾기
+        for (var key in tooltip) {
+            var element = tooltip[key];
+            if (element && element.type === "ItemPartBox" &&
+                element.value.Element_000 && element.value.Element_000.indexOf("팔찌 효과") !== -1) {
+                effectText = element.value.Element_001;
+                break;
+            }
+        }
+
+        if (!effectText) return { ok: false, reason: "NO_EFFECT" };
+
+        // 줄 단위 가공
+        var rawLines = effectText.split(/<BR>/i);
+        var parsedItems = [];
+        var lastItem = null;
+
+        for (var j = 0; j < rawLines.length; j++) {
+            var rawLine = rawLines[j].trim();
+            if (!rawLine || rawLine.indexOf("해당 효과는 한 파티 당 하나만 적용된다.") !== -1) continue;
+
+            var isNewEffect = rawLine.indexOf("<img") !== -1;
+            var cleanText = rawLine.replace(/<img[^>]*>|<\/img>/ig, "")
+                .replace(/<[^>]*>/g, "")
+                .replace(/\s+/g, " ")
+                .trim();
+
+            if (!cleanText) continue;
+
+            if (isNewEffect) {
+                var statMatch = cleanText.match(/^(치명|특화|신속|제압|인내|숙련|힘|민첩|지능|체력)\s*\+?([\d,]+)$/);
+                if (statMatch) {
+                    lastItem = { text: "[" + statMatch[1] + "] " + statMatch[2].replace(/,/g, "") };
+                    parsedItems.push(lastItem);
+                } else {
+                    lastItem = { text: "• " + cleanText };
+                    parsedItems.push(lastItem);
+                }
+            } else if (lastItem) {
+                lastItem.text += " " + cleanText;
+            }
+        }
+
+        var resultText = parsedItems.map(function (item) { return item.text; }).join("\n");
+        return { ok: true, name: charName, braceletName: bracelet.Name, content: resultText };
+
+    } catch (e) {
+        Log.e("[LOA] Bracelet parse error: " + e);
+        return { ok: false, reason: "PARSE_ERROR" };
+    }
 }
 
 // HTML 태그 제거
@@ -935,7 +1025,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
         var charCP = mCP[1];
         Log.i("[LOA] command CP char=" + charCP);
         var r1 = fetchCombatPower(charCP);
-        if (r1.ok) msg.reply(r1.name + "의\n\n⚔전투력:" + r1.combatPower);
+        if (r1.ok) msg.reply(r1.name + "의\n\n⚔전투력: " + r1.combatPower);
         else if (r1.reason === "NOT_FOUND") msg.reply("'" + charCP + "' 캐릭터를 찾을 수 없어요.");
         else if (r1.reason === "HTTP_401" || r1.reason === "HTTP_403") msg.reply("인증 오류입니다. API 키를 확인해주세요.");
         else if (r1.reason === "NO_FIELD") msg.reply("몰루? 아마도 점검중?");
@@ -1028,7 +1118,26 @@ bot.addListener(Event.MESSAGE, function (msg) {
         return;
     }
 
+    // 팔찌
+    var mBR = content.match(/^(?:\.팔찌|\.?ㅍㅉ)\s+(\S+)$/);
+    if (mBR) {
+        var charBR = mBR[1];
+        Log.i("[LOA] command BR char=" + charBR);
 
+        var rBR = fetchBracelet(charBR);
+        if (rBR.ok) {
+            msg.reply(rBR.name + "의 팔찌\n\n" + rBR.content);
+        } else if (rBR.reason === "NOT_FOUND") {
+            msg.reply("'" + charBR + "' 캐릭터를 찾을 수 없어요.");
+        } else if (rBR.reason === "NO_BRACELET") {
+            msg.reply("장착 중인 팔찌가 없거나 정보를 가져올 수 없어요.");
+        } else if (rBR.reason === "NO_EFFECT") {
+            msg.reply("팔찌 효과 정보를 찾을 수 없어요.");
+        } else {
+            msg.reply("팔찌 조회 실패 (" + (rBR.reason || "ERROR") + ")");
+        }
+        return;
+    }
 });
 
 
