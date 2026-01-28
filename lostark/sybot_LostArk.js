@@ -1161,7 +1161,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
 
         let result = [];
         for (let i = 0; i < count; i++) {
-            let direction = Math.random() < 0.5 ? "좌" : "오";
+            let direction = Math.random() < 0.5 ? "좌" : "우";
             result.push((i + 1) + ". " + direction);
         }
         msg.reply(result.join("\n"));
