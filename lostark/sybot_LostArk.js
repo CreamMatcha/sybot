@@ -278,7 +278,6 @@ function fetchBracelet(charNameRaw) {
 
     if (!arr || !arr.length) return { ok: false, reason: "NO_EQUIP" };
 
-    // Type === "팔찌" 찾기
     var bracelet = null;
     for (var i = 0; i < arr.length; i++) {
         if (arr[i] && arr[i].Type === "팔찌") { bracelet = arr[i]; break; }
@@ -289,7 +288,6 @@ function fetchBracelet(charNameRaw) {
         var tooltip = JSON.parse(bracelet.Tooltip);
         var effectText = "";
 
-        // Tooltip 내에서 "팔찌 효과" 섹션 찾기
         for (var key in tooltip) {
             var element = tooltip[key];
             if (element && element.type === "ItemPartBox" &&
@@ -301,9 +299,9 @@ function fetchBracelet(charNameRaw) {
 
         if (!effectText) return { ok: false, reason: "NO_EFFECT" };
 
-        // 줄 단위 가공
         var rawLines = effectText.split(/<BR>/i);
-        var parsedItems = [];
+        var stats = [];  // 스탯 정보를 담을 배열
+        var effects = []; // 일반 효과를 담을 배열
         var lastItem = null;
 
         for (var j = 0; j < rawLines.length; j++) {
@@ -321,19 +319,22 @@ function fetchBracelet(charNameRaw) {
             if (isNewEffect) {
                 var statMatch = cleanText.match(/^(치명|특화|신속|제압|인내|숙련|힘|민첩|지능|체력)\s*\+?([\d,]+)$/);
                 if (statMatch) {
-                    lastItem = { text: "[" + statMatch[1] + "] " + statMatch[2].replace(/,/g, "") };
-                    parsedItems.push(lastItem);
+                    lastItem = { type: "stat", text: "[" + statMatch[1] + "] " + statMatch[2].replace(/,/g, "") };
+                    stats.push(lastItem);
                 } else {
-                    lastItem = { text: "• " + cleanText };
-                    parsedItems.push(lastItem);
+                    lastItem = { type: "effect", text: "• " + cleanText };
+                    effects.push(lastItem);
                 }
             } else if (lastItem) {
                 lastItem.text += " " + cleanText;
             }
         }
 
-        var resultText = parsedItems.map(function (item) { return item.text; }).join("\n");
-        return { ok: true, name: charName, braceletName: bracelet.Name, content: resultText };
+        // 스탯 정보를 먼저 배치하고 그 뒤에 일반 효과를 합침
+        var combinedItems = stats.concat(effects);
+        var resultText = combinedItems.map(function (item) { return item.text; }).join("\n");
+
+        return { ok: true, name: charName, content: resultText };
 
     } catch (e) {
         Log.e("[LOA] Bracelet parse error: " + e);
@@ -1137,6 +1138,33 @@ bot.addListener(Event.MESSAGE, function (msg) {
             msg.reply("팔찌 조회 실패 (" + (rBR.reason || "ERROR") + ")");
         }
         return;
+    }
+
+    // 지옥
+    var hellMatch = content.match(/^(?:\.ㅈㅇ|\.지옥|ㅈㅇ)\s*(\d+)?/);
+
+    if (hellMatch) {
+        let count = parseInt(hellMatch[1]);
+
+        // 숫자가 입력되지 않았을 경우 기본값 1회 설정
+        if (isNaN(count)) {
+            count = 1;
+        }
+
+        if (count > 30) {
+            msg.reply("지옥은 최대 30번까지만 갈 수 있어요! (30회로 실행합니다)");
+            count = 30;
+        } else if (count <= 0) {
+            msg.reply("지옥에 가려면 1 이상의 숫자를 입력해주세요.");
+            return;
+        }
+
+        let result = [];
+        for (let i = 0; i < count; i++) {
+            let direction = Math.random() < 0.5 ? "좌" : "우";
+            result.push((i + 1) + ". " + direction);
+        }
+        msg.reply(result.join("\n"));
     }
 });
 
