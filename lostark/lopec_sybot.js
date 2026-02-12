@@ -20,7 +20,7 @@ var ALLOWED_ROOMS = [
 ];
 
 /***** [설정] Lopec 스펙포인트/티어 서버 주소 *****/
-var LOPEC_SERVER_BASE = "http://34.158.199.54:3100";
+var LOPEC_SERVER_BASE = "http://34.64.244.233:3100";
 
 /***** 로깅 옵션 *****/
 var LOPEC_DEBUG = true;
