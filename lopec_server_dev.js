@@ -1,132 +1,135 @@
-// lopec_server.js
-// 로펙 점수/티어를 크롤링해서 JSON으로 돌려주는 간단 서버 + 카카오링크 기능 추가
-
 const express = require('express');
 const puppeteer = require('puppeteer');
 const cheerio = require('cheerio');
-// [1] 카카오링크 모듈 불러오기
-const { KakaoLinkClient } = require('node-kakaolink');
+const fs = require('fs');
 
 const app = express();
-
-// [2] 포트 변경 (3100 -> 3101) : 개발 서버용
 const PORT = 3101;
 
-// [3] 카카오링크 설정
-// 카카오 디벨로퍼스(https://developers.kakao.com/)에서 확인
-const KAKAO_JS_KEY = "63ccd6c2bfe4e0b189d6d2eeeac77584";
-const KAKAO_URL = "http://google.com"; // 예: http://google.com (카카오에 등록된 도메인)
+app.use(express.json());
 
-const kakao = new KakaoLinkClient(KAKAO_JS_KEY, KAKAO_URL);
+// ★ 티어별 이미지 (보조용)
+const TIER_IMAGES = {
+    '에스더': 'https://cdnlopec.xyz/asset/image/esther.png',
+    '마스터': 'https://cdnlopec.xyz/asset/image/master.png',
+    '다이아몬드': 'https://cdnlopec.xyz/asset/image/diamond.png',
+    '골드': 'https://cdnlopec.xyz/asset/image/gold.png',
+    '실버': 'https://cdnlopec.xyz/asset/image/silver.png',
+    '브론즈': 'https://cdnlopec.xyz/asset/image/bronze.png',
+    '기본': 'https://imgur.com/a/eYjcWaC'
+};
 
-// [4] 서버 켜질 때 카카오 로그인 시도
-kakao.login("appleseoy@gmail.com", "seo248555!!").then(() => {
-    console.log("✅ 카카오 로그인 성공!");
-}).catch(err => {
-    console.error("❌ 카카오 로그인 실패:", err);
-});
-
-// 헬스 체크용
-app.get('/health', (req, res) => {
-    res.json({ ok: true });
-});
-
-// 실제 크롤링 로직 (fetchLopecData 함수 - 중복 제거됨)
-async function fetchLopecData(name) {
-    console.log('=== fetchLopecData START ===');
-    console.log('name =', name);
-
-    const encodedName = encodeURIComponent(name);
-    const url = 'https://legacy.lopec.kr/search/search.html?headerCharacterName=' + encodedName;
-    console.log('url =', url);
-
-    const browser = await puppeteer.launch({
-        headless: 'new',
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
-
-    try {
-        const page = await browser.newPage();
-        await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        const html = await page.content();
-        const $ = cheerio.load(html);
-
-        let specPoint = null;
-        const specText = $('.spec-point').first().text().trim();
-        if (specText) {
-            let cleaned = specText.replace(/[^\d.,]/g, '').replace(/,/g, '');
-            specPoint = cleaned;
-        }
-
-        let tierName = null;
-        const tierSpan = $('.tier.now').first();
-        if (tierSpan.length) {
-            const classAttr = tierSpan.attr('class') || '';
-            const classes = classAttr.split(/\s+/);
-            const tierMapping = {
-                esther: '에스더', master: '마스터', diamond: '다이아몬드',
-                platinum: '플래티넘', gold: '골드', silver: '실버', bronze: '브론즈', iron: '아이언',
-            };
-            const foundKey = classes.find((c) => tierMapping[c]);
-            if (foundKey) {
-                tierName = tierMapping[foundKey];
-            } else {
-                const txt = tierSpan.text().trim();
-                if (txt && !/^[N0-9\s]+$/i.test(txt)) tierName = txt;
-            }
-        }
-        return { ok: true, name, specPoint, tierName, url };
-    } finally {
-        await browser.close();
+function getTierImage(tierText) {
+    if (!tierText) return TIER_IMAGES['기본'];
+    for (const key in TIER_IMAGES) {
+        if (tierText.includes(key)) return TIER_IMAGES[key];
     }
+    return TIER_IMAGES['기본'];
 }
 
-// /lopec 엔드포인트
-app.get('/lopec', async (req, res) => {
-    const name = (req.query.name || '').trim();
-    console.log('GET /lopec name =', name);
+app.get('/search', async (req, res) => {
+    const { name } = req.query;
+    if (!name) return res.json({ ok: false, error: "이름을 입력해주세요." });
 
-    if (!name) {
-        res.status(400).json({ ok: false, message: 'name query is required' });
-        return;
-    }
+    console.log(`🔎 [Legacy Lopec] ${name} 검색 시작...`);
 
+    let browser = null;
     try {
-        const data = await fetchLopecData(name);
-        res.json(data);
-    } catch (err) {
-        console.error('ERROR in /lopec:', err);
-        res.status(500).json({ ok: false, message: String(err && err.message || err) });
-    }
-});
+        browser = await puppeteer.launch({
+            headless: "new",
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu'
+            ]
+        });
+        const page = await browser.newPage();
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-// [5] 카카오링크 전송 라우터 추가
-app.get('/kakao/send', async (req, res) => {
-    const { room, title, desc } = req.query; // 봇이 보내주는 데이터
+        const url = `https://legacy.lopec.kr/search/search.html?headerCharacterName=${encodeURIComponent(name)}`;
 
-    if (!room) return res.json({ ok: false, msg: "방 이름이 없습니다." });
+        // 페이지 접속
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-    try {
-        // 템플릿 보내기
-        await kakao.sendLink(room, {
-            template_id: 12345, // ★본인의 템플릿 ID로 수정★
-            template_args: {
-                title: title || '제목 없음',
-                desc: desc || '내용 없음'
+        // 로딩 대기
+        try {
+            await page.waitForFunction(
+                () => {
+                    const el = document.querySelector('.spec-area .tier-box .spec-point');
+                    return el && el.innerText.trim().length > 0 && !el.innerText.includes('로딩중');
+                },
+                { timeout: 10000 }
+            );
+        } catch (waitError) {
+            console.log("⚠️ 로딩 대기 시간 초과");
+        }
+
+        const content = await page.content();
+        const $ = cheerio.load(content);
+
+        // 데이터 추출
+        const tierNameRaw = $('.spec-area .gauge-box .tier.now').text().trim() || "Unranked";
+
+        let score = $('.spec-area .tier-box .spec-point').text().trim() || "0";
+        score = score.replace('로딩중', '0');
+
+        // ★★★ [수정됨] 랭킹 및 퍼센트 분리 추출 ★★★
+
+        // 1. 전체 랭킹
+        const totalRankEl = $('.info-area .info-box').eq(2).find('.name').eq(0);
+        const totalRankText = totalRankEl.text();
+        const totalRankMatch = totalRankText.match(/([0-9,]+위)/);
+        const totalRank = totalRankMatch ? totalRankMatch[1] : "-";
+
+        // <em> 태그 안의 퍼센트 추출 (예: 0.57%)
+        const totalPercent = totalRankEl.find('em').text().trim() || "";
+
+        // 2. 직업 랭킹
+        const classRankEl = $('.info-area .info-box').eq(2).find('.name').eq(1);
+        const classRankText = classRankEl.text();
+        const classRankMatch = classRankText.match(/([0-9,]+위)/);
+        const classRank = classRankMatch ? classRankMatch[1] : "-";
+
+        // <em> 태그 안의 퍼센트 추출 (예: 0.76%)
+        const classPercent = classRankEl.find('em').text().trim() || "";
+
+        // 이미지 추출
+        let tierImgUrl = $('.spec-area .tier-box img').attr('src');
+        if (!tierImgUrl) {
+            tierImgUrl = getTierImage(tierNameRaw);
+        } else if (!tierImgUrl.startsWith('http')) {
+            tierImgUrl = 'https://legacy.lopec.kr' + tierImgUrl;
+        }
+
+        const charImg = $('.sc-profile .group-img img').attr('src');
+
+        console.log(`✅ 추출 성공: ${name} / ${tierNameRaw} / ${totalPercent}`);
+
+        res.json({
+            ok: true,
+            data: {
+                name: name,
+                tier_name: tierNameRaw,
+                tier_img: tierImgUrl,
+                class_rank: classRank,
+                class_percent: classPercent, // ★ 추가됨 (직업 %)
+                total_rank: totalRank,
+                total_percent: totalPercent, // ★ 추가됨 (전체 %)
+                score: score,
+                char_img: charImg,
+                url: url
             }
         });
 
-        console.log(`[카카오링크] ${room} 방으로 전송 완료`);
-        res.json({ ok: true, msg: "전송 성공" });
     } catch (e) {
-        console.error("[카카오링크] 전송 실패:", e);
-        res.json({ ok: false, msg: "전송 에러 발생" });
+        console.error("❌ 크롤링 에러:", e);
+        if (!res.headersSent) res.json({ ok: false, error: "서버 내부 오류" });
+    } finally {
+        if (browser) await browser.close();
     }
 });
 
-// 서버 시작
-app.listen(PORT, () => {
-    console.log(`LOPEC SERVER RUNNING on port ${PORT}`); // 3101번 포트
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Lopec API 서버 가동! (포트: ${PORT})`);
 });

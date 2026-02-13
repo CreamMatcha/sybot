@@ -1,41 +1,93 @@
-// [test_kakao.js]
-// 카카오링크 기능 개발 서버(3101) 테스트용 스크립트
+const bot = BotManager.getCurrentBot();
 
-// ★중요★: 구글 클라우드 VM의 [외부 IP]를 여기에 적으세요.
-// 예: "http://34.64.xxx.xxx:3101"
-const DEV_SERVER_URL = "http://34.64.244.233:3101";
+// ★ 모듈 불러오기 (Global_Modules에 'kakaolink' 폴더가 있어야 함)
+const { KakaoApiService, KakaoShareClient } = require('kakaolink');
 
-function response(room, msg, sender, isGroup, replier, imageDB, packageName) {
-    // 명령어: .카링테스트
-    if (msg == ".카링테스트") {
-        try {
-            replier.reply("🚀 3101번 개발 서버로 요청을 보냅니다...");
+// ★ 카카오 디벨로퍼스 설정
+const SERVER_URL = "http://34.64.244.233:3101/search";
 
-            // 1. 보낼 데이터 준비 (방 이름, 제목, 설명)
-            // 방 이름(room)은 한글일 수 있으니 인코딩(encodeURIComponent) 필수!
-            var params = "?room=" + encodeURIComponent(room)
-                + "&title=" + encodeURIComponent("테스트 제목")
-                + "&desc=" + encodeURIComponent("테스트 내용입니다.");
+const JS_KEY = "63ccd6c2bfe4e0b189d6d2eeeac77584";
 
-            // 2. 서버로 GET 요청 보내기
-            var targetUrl = DEV_SERVER_URL + "/kakao/send" + params;
-            var resultJson = org.jsoup.Jsoup.connect(targetUrl)
-                .ignoreContentType(true) // JSON 응답을 받기 위해 필수
-                .get()
-                .text();
+const DOMAIN = "https://google.com";
 
-            // 3. 결과 확인
-            var result = JSON.parse(resultJson);
+const TEMPLATE_ID = 129396;
 
-            if (result.ok) {
-                replier.reply("✅ 서버 응답: 전송 성공!");
-            } else {
-                replier.reply("❌ 서버 응답 에러: " + result.msg);
-            }
+// ★ 서비스 & 클라이언트 생성
+const service = KakaoApiService.createService();
+const client = KakaoShareClient.createClient();
 
-        } catch (e) {
-            replier.reply("⛔ 연결 실패!\n이유: " + e + "\n\n(혹시 방화벽 3101번을 안 열었거나 IP가 틀렸는지 확인하세요)");
-            Log.e(e);
-        }
+// ★ 로그인 (한 번만 실행하면 됨 - 세션 유지)
+let loginCookies = null;
+
+function tryLogin() {
+    try {
+        // 알아서 카톡 앱 정보를 읽어서 로그인 시도
+        loginCookies = service.login({
+            signInWithKakaoTalk: true,
+            context: App.getContext() // 모듈이 알아서 처리함
+        }).awaitResult();
+
+        Log.i("✅ 카카오링크 자동 로그인 성공!");
+    } catch (e) {
+        Log.e("⚠️ 로그인 실패 (수동 로그인 필요할 수 있음): " + e);
     }
 }
+
+// 스크립트 로드 시 1회 로그인 시도
+tryLogin();
+
+
+bot.addListener(Event.MESSAGE, function (msg) {
+    if (msg.content.startsWith(".ㄹㅍ ")) {
+        var name = msg.content.substr(4).trim();
+        msg.reply(name + " 검색 중... 🚀");
+
+        new java.lang.Thread(function () {
+            try {
+                // 1. 서버 데이터 조회
+                var jsonBody = org.jsoup.Jsoup.connect(SERVER_URL).data("name", name).ignoreContentType(true).timeout(15000).execute().body();
+                var res = JSON.parse(jsonBody);
+
+                if (res.ok) {
+                    var d = res.data;
+
+                    // 2. 로그인이 안 되어있으면 재시도
+                    if (!loginCookies) tryLogin();
+
+                    // 3. 클라이언트 초기화
+                    client.init(JS_KEY, DOMAIN, loginCookies);
+
+                    // 4. [자동 전송] 
+                    var sendRes = client.sendLink(msg.room, {
+                        templateId: TEMPLATE_ID,
+                        templateArgs: {
+                            // 기본 텍스트 정보
+                            "name": d.name,
+                            "tier_name": d.tier_name,
+                            "score": d.score,
+
+                            // ★ 랭킹 정보 (위/%)
+                            "class_rank": d.class_rank,       // 예: 565위
+                            "class_percent": d.class_percent, // 예: 0.76% (새로 추가됨)
+
+                            "total_rank": d.total_rank,       // 예: 1,085위
+                            "total_percent": d.total_percent, // 예: 0.57% (새로 추가됨)
+
+                            // 이미지 정보
+                            "char_img": d.char_img || d.tier_img,
+                            "tier_img": d.tier_img
+                        }
+                    }, 'custom').awaitResult();
+
+                    Log.i("전송 결과: " + JSON.stringify(sendRes));
+
+                } else {
+                    msg.reply("❌ 검색 실패: " + res.error);
+                }
+            } catch (e) {
+                Log.e("에러: " + e);
+                msg.reply("오류 발생: " + e.message);
+            }
+        }).start();
+    }
+});
