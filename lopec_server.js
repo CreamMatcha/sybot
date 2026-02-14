@@ -1,137 +1,191 @@
-// lopec_server.js
-// 로펙 점수/티어를 크롤링해서 JSON으로 돌려주는 간단 서버
+// 2026.02.14 기준 테스트완료
+
 
 const express = require('express');
 const puppeteer = require('puppeteer');
 const cheerio = require('cheerio');
+const fs = require('fs');
 
 const app = express();
-const PORT = 3100;
+const PORT = 3101;
 
-// 헬스 체크용
-app.get('/health', (req, res) => {
-  res.json({ ok: true });
-});
+app.use(express.json());
 
-// 실제 크롤링 로직
-async function fetchLopecData(name) {
-  console.log('=== fetchLopecData START ===');
-  console.log('name =', name);
+// 티어별 이미지
+const TIER_IMAGES = {
+  '에스더': 'https://cdnlopec.xyz/asset/image/esther.png',
+  '마스터': 'https://cdnlopec.xyz/asset/image/master.png',
+  '다이아몬드': 'https://cdnlopec.xyz/asset/image/diamond.png',
+  '골드': 'https://cdnlopec.xyz/asset/image/gold.png',
+  '실버': 'https://cdnlopec.xyz/asset/image/silver.png',
+  '브론즈': 'https://cdnlopec.xyz/asset/image/bronze.png',
+  '기본': 'https://i.imgur.com/VucNVmi.jpeg'
+};
 
-  const encodedName = encodeURIComponent(name);
-  const url =
-    'https://legacy.lopec.kr/search/search.html?headerCharacterName=' +
-    encodedName;
-  console.log('url =', url);
+const CLASS_IMAGES = {
+  '버서커': 'https://i.imgur.com/Fnwa0D6.png',
+  '워로드': 'https://i.imgur.com/UImdsLL.png',
+  '디스트로이어': 'https://i.imgur.com/6weEtzK.png',
+  '홀리나이트': 'https://i.imgur.com/XwJJJ4L.png',
+  '슬레이어': 'https://i.imgur.com/imtQiNs.png',
+  '발키리': 'https://i.imgur.com/Tv5d5AR.png',
+  '아르카나': 'https://i.imgur.com/QNCXkb0.png',
+  '바드': 'https://i.imgur.com/uwVYaCB.png',
+  '서머너': 'https://i.imgur.com/a7TU5wQ.png',
+  '소서리스': 'https://i.imgur.com/4u9ERvH.png',
+  '데빌헌터': 'https://i.imgur.com/RJNzf1f.png',
+  '호크아이': 'https://i.imgur.com/ACnwYEk.png',
+  '블래스터': 'https://i.imgur.com/vSRUaZs.png',
+  '스카우터': 'https://i.imgur.com/AJrswvy.png',
+  '건슬링어': 'https://i.imgur.com/gKNGtfy.png',
+  '배틀마스터': 'https://i.imgur.com/6FKSfOf.png',
+  '인파이터': 'https://i.imgur.com/pIfR6BE.png',
+  '기공사': 'https://i.imgur.com/q3sTlJD.png',
+  '창술사': 'https://i.imgur.com/PIxSail.png',
+  '스트라이커': 'https://i.imgur.com/ovHY0SO.png',
+  '브레이커': 'https://i.imgur.com/sksysh4.png',
+  '리퍼': 'https://i.imgur.com/eUrILM9.png',
+  '데모닉': 'https://i.imgur.com/sgXw3ta.png',
+  '블레이드': 'https://i.imgur.com/4rp4bWa.png',
+  '소울이터': 'https://i.imgur.com/yMUbl8q.png',
+  '기상술사': 'https://i.imgur.com/J4ijhdU.png',
+  '도화가': 'https://i.imgur.com/XpOE6jY.png',
+  '환수사': 'https://i.imgur.com/lRzDjDb.png',
+  '가디언나이트': 'https://i.imgur.com/l6glgxq.png',
 
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-  });
+  '기본': 'https://i.imgur.com/VucNVmi.jpeg'
+};
 
-  try {
-    const page = await browser.newPage();
-
-    // 페이지 접속
-    await page.goto(url, {
-      waitUntil: 'networkidle2',
-      timeout: 30000,
-    });
-
-    // 살짝 여유
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    const html = await page.content();
-    console.log('HTML length =', html.length);
-
-    const $ = cheerio.load(html);
-
-    // ---------- 스펙 포인트 ----------
-    let specPoint = null;
-    const specText = $('.spec-point').first().text().trim();
-    console.log('spec-point raw text =', JSON.stringify(specText));
-
-    if (specText) {
-      // 숫자/콤마/점 외 제거 후 콤마 제거
-      let cleaned = specText.replace(/[^\d.,]/g, '').replace(/,/g, '');
-      specPoint = cleaned;
-    }
-
-    // ---------- 티어 이름만 추출 ----------
-    let tierName = null;
-    const tierSpan = $('.tier.now').first();
-
-    if (tierSpan.length) {
-      const classAttr = tierSpan.attr('class') || '';
-      const classes = classAttr.split(/\s+/);
-      console.log('tier span class =', JSON.stringify(classAttr));
-
-      // CSS 클래스 → 한글 티어명 매핑
-      const tierMapping = {
-        esther: '에스더',
-        master: '마스터',
-        diamond: '다이아몬드',
-        platinum: '플래티넘',
-        gold: '골드',
-        silver: '실버',
-        bronze: '브론즈',
-        iron: '아이언',
-      };
-
-      // 클래스 목록 중에서 티어에 해당하는 키만 찾기
-      const foundKey = classes.find((c) => tierMapping[c]);
-
-      if (foundKey) {
-        tierName = tierMapping[foundKey];
-      } else {
-        // 혹시 모를 예외 케이스 대비: 텍스트가 NN 같은 잔여 점수가 아니면 텍스트 사용
-        const txt = tierSpan.text().trim();
-        console.log('tier span text =', JSON.stringify(txt));
-        if (txt && !/^[N0-9\s]+$/i.test(txt)) {
-          tierName = txt;
-        }
-      }
-    }
-
-    console.log('parsed specPoint =', specPoint);
-    console.log('parsed tierName  =', tierName);
-    console.log('=== fetchLopecData END ===');
-
-    // remaining(남은 점수)는 더 이상 반환하지 않음
-    return {
-      ok: true,
-      name,
-      specPoint,
-      tierName,
-      url,
-    };
-  } finally {
-    await browser.close();
+function getTierImage(tierText) {
+  if (!tierText) return TIER_IMAGES['기본'];
+  for (const key in TIER_IMAGES) {
+    if (tierText.includes(key)) return TIER_IMAGES[key];
   }
+  return TIER_IMAGES['기본'];
 }
 
-// /lopec 엔드포인트: ?name=캐릭터명
-app.get('/lopec', async (req, res) => {
-  const name = (req.query.name || '').trim();
-  console.log('GET /lopec name =', name);
+app.get('/search', async (req, res) => {
+  const { name } = req.query;
+  if (!name) return res.json({ ok: false, error: "이름을 입력해주세요." });
 
-  if (!name) {
-    res.status(400).json({ ok: false, message: 'name query is required' });
-    return;
-  }
+  console.log(`🔎 [Legacy Lopec] ${name} 검색 시작...`);
 
+  let browser = null;
   try {
-    const data = await fetchLopecData(name);
-    res.json(data);
-  } catch (err) {
-    console.error('ERROR in /lopec:', err);
-    res
-      .status(500)
-      .json({ ok: false, message: String(err && err.message || err) });
+    browser = await puppeteer.launch({
+      headless: "new",
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
+      ]
+    });
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+    const url = `https://legacy.lopec.kr/search/search.html?headerCharacterName=${encodeURIComponent(name)}`;
+
+    // 페이지 접속
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+    // 로딩 대기
+    try {
+      await page.waitForFunction(
+        () => {
+          const el = document.querySelector('.spec-area .tier-box .spec-point');
+          return el && el.innerText.trim().length > 0 && !el.innerText.includes('로딩중');
+        },
+        { timeout: 10000 }
+      );
+    } catch (waitError) {
+      console.log("⚠️ 로딩 대기 시간 초과");
+    }
+
+    const content = await page.content();
+    const $ = cheerio.load(content);
+
+    // 데이터 추출
+    const tierNameRaw = $('.spec-area .gauge-box .tier.now').text().trim() || "Unranked";
+
+    let score = $('.spec-area .tier-box .spec-point').text().trim() || "0";
+    score = score.replace('로딩중', '0');
+
+    // 1. 전체 랭킹
+    const totalRankEl = $('.info-area .info-box').eq(2).find('.name').eq(0);
+    const totalRankText = totalRankEl.text();
+    const totalRankMatch = totalRankText.match(/([0-9,]+위)/);
+    const totalRank = totalRankMatch ? totalRankMatch[1] : "-";
+
+    // <em> 태그 안의 퍼센트 추출 (예: 0.57%)
+    const totalPercent = totalRankEl.find('em').text().trim() || "";
+
+    // 2. 직업 랭킹
+    const classRankEl = $('.info-area .info-box').eq(2).find('.name').eq(1);
+    const classRankText = classRankEl.text();
+    const classRankMatch = classRankText.match(/([0-9,]+위)/);
+    const classRank = classRankMatch ? classRankMatch[1] : "-";
+
+    // <em> 태그 안의 퍼센트 추출 (예: 0.76%)
+    const classPercent = classRankEl.find('em').text().trim() || "";
+
+    // 예: "#서폿 바드" -> "바드" 추출
+    const jobRaw = $('.sc-profile .name-area .job').text().trim();
+    const className = jobRaw.split(' ').pop(); // 공백으로 자르고 마지막 단어 가져오기
+
+    // 미리 정의한 목록에서 이미지 찾기 (없으면 기본 이미지)
+    const classImgUrl = CLASS_IMAGES[className] || CLASS_IMAGES['기본'];
+
+    // 이미지 추출
+    let tierImgUrl = $('.spec-area .tier-box img').attr('src');
+    if (!tierImgUrl) {
+      tierImgUrl = getTierImage(tierNameRaw);
+    } else if (!tierImgUrl.startsWith('http')) {
+      tierImgUrl = 'https://legacy.lopec.kr' + tierImgUrl;
+    }
+
+    const charImg = $('.sc-profile .group-img img').attr('src');
+
+    // .info-area 안의 모든 .name 태그를 뒤져서 "레벨 :" 로 시작하는 걸 찾습니다.
+    let level = "0";
+    $('.info-area .info-box .name').each(function () {
+      const text = $(this).text().trim();
+      if (text.startsWith('레벨 :')) {
+        // "레벨 : 1,771.66" -> "1,771.66" 만 남김
+        level = text.replace('레벨 :', '').trim();
+      }
+    });
+
+    console.log(`✅ 추출 성공: ${name} / ${className} / Lv.${level}`);
+
+    res.json({
+      ok: true,
+      data: {
+        name: name,
+        class_name: className,
+        class_img: classImgUrl,
+        item_level: level, // ★ 추출한 레벨 담기
+
+        tier_name: tierNameRaw,
+        tier_img: tierImgUrl,
+        class_rank: classRank,
+        class_percent: classPercent,
+        total_rank: totalRank,
+        total_percent: totalPercent,
+        score: score,
+        char_img: charImg,
+        url: url
+      }
+    });
+
+  } catch (e) {
+    console.error("❌ 크롤링 에러:", e);
+    if (!res.headersSent) res.json({ ok: false, error: "서버 내부 오류" });
+  } finally {
+    if (browser) await browser.close();
   }
 });
 
-// 서버 시작
-app.listen(PORT, () => {
-  console.log(`LOPEC SERVER RUNNING on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Lopec API 서버 가동! (포트: ${PORT})`);
 });

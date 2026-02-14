@@ -1,172 +1,96 @@
-/************************************************************
- * Lopec (로펙) 조회 전용 스크립트
- *
- * 사용법:
- *   .ㄹㅍ 캐릭터명
- *   .로펙 캐릭터명
- *
- * 동작 방 제한:
- *   ALLOWED_ROOMS 에 방 이름을 넣으면 그 방에서만 작동
- ************************************************************/
+const bot = BotManager.getCurrentBot();
 
-var bot = BotManager.getCurrentBot();
-bot.setCommandPrefix("."); // 다른 파일에서 이미 설정했으면 무시됨
+// 모듈 불러오기 (Global_Modules에 'kakaolink' 폴더가 있어야 함)
+const { KakaoApiService, KakaoShareClient } = require('kakaolink');
 
-try { Log.i("[LOPEC] script loaded"); } catch (e) { }
+// 카카오 디벨로퍼스 설정
+const SERVER_URL = "http://34.64.244.233:3101/search";
 
-/***** [설정] 특정 방에서만 동작 *****/
-var ALLOWED_ROOMS = [
-    "아크라시아인의 휴식처"
-];
+const JS_KEY = "63ccd6c2bfe4e0b189d6d2eeeac77584";
 
-/***** [설정] Lopec 스펙포인트/티어 서버 주소 *****/
-var LOPEC_SERVER_BASE = "http://34.64.244.233:3100";
+const DOMAIN = "https://google.com";
 
-/***** 로깅 옵션 *****/
-var LOPEC_DEBUG = true;
-function dbg() { if (LOPEC_DEBUG) try { Log.i.apply(Log, ["[LOPEC]"].concat([].slice.call(arguments))); } catch (_) { } }
+const TEMPLATE_ID = 129396;
 
-function httpGetUtf8(urlStr, headersObj) {
+// 서비스 & 클라이언트 생성
+const service = KakaoApiService.createService();
+const client = KakaoShareClient.createClient();
+
+// 로그인 (한 번만 실행하면 됨 - 세션 유지)
+let loginCookies = null;
+
+function tryLogin() {
     try {
-        var url = new java.net.URL(urlStr);
-        var conn = url.openConnection();
-        conn.setConnectTimeout(15000);
-        conn.setReadTimeout(20000);
+        // 알아서 카톡 앱 정보를 읽어서 로그인 시도
+        loginCookies = service.login({
+            signInWithKakaoTalk: true,
+            context: App.getContext() // 모듈이 알아서 처리함
+        }).awaitResult();
 
-        conn.setRequestProperty("accept", "application/json");
-        if (headersObj) {
-            for (var k in headersObj) {
-                if (Object.prototype.hasOwnProperty.call(headersObj, k)) {
-                    conn.setRequestProperty(String(k), String(headersObj[k]));
-                }
-            }
-        }
-
-        var code = conn.getResponseCode();
-        var isOK = (code >= 200 && code < 300);
-        var stream = isOK ? conn.getInputStream() : conn.getErrorStream();
-        if (stream == null) return { ok: false, code: code, text: null };
-
-        var isr = new java.io.InputStreamReader(stream, "UTF-8");
-        var br = new java.io.BufferedReader(isr);
-        var sb = new java.lang.StringBuilder();
-        var line;
-        while ((line = br.readLine()) !== null) sb.append(line).append('\n');
-        br.close(); isr.close();
-
-        return { ok: isOK, code: code, text: String(sb.toString()) };
+        Log.i("✅ 카카오링크 자동 로그인 성공!");
     } catch (e) {
-        try { Log.e("[LOPEC] httpGetUtf8 ERROR: " + e); } catch (_) { }
-        return { ok: false, code: -1, text: null, err: String(e) };
+        Log.e("⚠️ 로그인 실패 (수동 로그인 필요할 수 있음): " + e);
     }
 }
 
-// 숫자/숫자문자열을 "1,234,567" 형태로 변환 (음수/소수점 대응)
-function formatThousandsSafe(x) {
-    try {
-        var s = String(x)
-            .replace(/[\u00A0\u2000-\u200B\u202F\u205F\u3000]/g, "")
-            .replace(/,/g, "")
-            .trim();
+// 스크립트 로드 시 1회 로그인 시도
+tryLogin();
 
-        if (s === "" || s === "-" || s === ".") return s || "0";
 
-        var neg = false;
-        if (s[0] === "-") { neg = true; s = s.slice(1); }
-
-        s = s.replace(/[^0-9.]/g, "");
-        var parts = s.split(".");
-        var intPart = parts[0] || "0";
-        var fracPart = parts.length > 1 ? parts.slice(1).join("") : "";
-
-        intPart = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-
-        var out = fracPart ? (intPart + "." + fracPart) : intPart;
-        return neg ? "-" + out : out;
-    } catch (e) {
-        try { Log.e("[LOPEC] formatThousandsSafe error: " + e + " / x=" + x); } catch (_) { }
-        return String(x);
-    }
-}
-
-// Lopec 서버에서 스펙 포인트/티어 정보 가져오기
-function fetchLopecInfo(charNameRaw) {
-    var name = String(charNameRaw || "").trim();
-    if (!name) return { ok: false, reason: "NO_NAME" };
-
-    var url = LOPEC_SERVER_BASE + "/lopec?name=" + encodeURIComponent(name);
-    var t0 = java.lang.System.currentTimeMillis();
-    var res = httpGetUtf8(url, null);
-    var dt = java.lang.System.currentTimeMillis() - t0;
-
-    dbg("HTTP", "ok=" + res.ok, "code=" + res.code, "ms=" + dt, "url=" + url);
-
-    if (!res.ok) return { ok: false, reason: "HTTP_" + res.code };
-
-    var body = res.text || "";
-    var js;
-    try {
-        js = JSON.parse(body);
-    } catch (e) {
-        try { Log.e("[LOPEC] JSON parse error: " + e); } catch (_) { }
-        return { ok: false, reason: "PARSE_ERROR" };
-    }
-
-    if (!js || js.ok !== true) {
-        return { ok: false, reason: (js && js.message) ? String(js.message) : "REMOTE_FAIL" };
-    }
-
-    return {
-        ok: true,
-        name: js.name || name,
-        specPoint: js.specPoint || "",
-        tierName: js.tierName || "",
-        remaining: js.remaining || "",
-        url: js.url || ""
-    };
-}
-
-/***** 메시지 리스너 *****/
 bot.addListener(Event.MESSAGE, function (msg) {
-    var room = msg.room || "";
-    var content = (msg.content || "").trim();
+    if (msg.content.startsWith(".ㄹㅍ ")) {
+        var name = msg.content.substr(4).trim();
+        msg.reply(name + " 검색 중... ");
 
-    if (!ALLOWED_ROOMS.includes(room)) return;
-    // 로펙: ".ㄹㅍ 캐릭" / ".로펙 캐릭" / "ㄹㅍ 캐릭" / "로펙 캐릭"
-    var mLP = content.match(/^(?:\.?ㄹㅍ|\.?로펙)\s+(\S+)$/);
-    if (!mLP) return;
+        new java.lang.Thread(function () {
+            try {
+                // 1. 서버 데이터 조회
+                var jsonBody = org.jsoup.Jsoup.connect(SERVER_URL).data("name", name).ignoreContentType(true).timeout(15000).execute().body();
+                var res = JSON.parse(jsonBody);
 
-    var lpName = mLP[1];
-    dbg("command name=" + lpName);
+                if (res.ok) {
+                    var d = res.data;
 
-    var r = fetchLopecInfo(lpName);
+                    // 2. 로그인이 안 되어있으면 재시도
+                    if (!loginCookies) tryLogin();
 
-    if (!r.ok) {
-        if (r.reason && r.reason.indexOf("HTTP_") === 0) {
-            msg.reply("로펙 서버 연결에 실패했어요. (" + r.reason + ")");
-        } else if (r.reason === "REMOTE_FAIL") {
-            msg.reply("로펙 페이지에서 스펙 포인트/티어를 찾지 못했어요. 페이지 구조가 바뀐 듯 합니다.");
-        } else {
-            msg.reply("로펙 정보 조회에 실패했어요. (" + (r.reason || "ERROR") + ")");
-        }
-        return;
+                    // 3. 클라이언트 초기화
+                    client.init(JS_KEY, DOMAIN, loginCookies);
+
+                    // 4. [자동 전송] 
+                    var sendRes = client.sendLink(msg.room, {
+                        templateId: TEMPLATE_ID,
+                        templateArgs: {
+                            // 기본 텍스트 정보
+                            "name": d.name,
+                            "tier_name": d.tier_name,
+                            "score": d.score,
+                            "level": d.item_level,
+
+                            // ★ 랭킹 정보 (위/%)
+                            "class_rank": d.class_rank,       // 예: 565위
+                            "class_percent": d.class_percent, // 예: 0.76% (새로 추가됨)
+
+                            "total_rank": d.total_rank,       // 예: 1,085위
+                            "total_percent": d.total_percent, // 예: 0.57% (새로 추가됨)
+
+                            // 이미지 정보
+                            "char_img": d.char_img || d.tier_img,
+                            "tier_img": d.tier_img,
+
+                            "class_img": d.class_img
+                        }
+                    }, 'custom').awaitResult();
+
+                    Log.i("전송 결과: " + JSON.stringify(sendRes));
+
+                } else {
+                    msg.reply("❌ 검색 실패: " + res.error);
+                }
+            } catch (e) {
+                Log.e("에러: " + e);
+                msg.reply("오류 발생: " + e.message);
+            }
+        }).start();
     }
-
-    var spec = r.specPoint ? formatThousandsSafe(r.specPoint) : "정보 없음";
-
-    // 원본 스크립트처럼 remaining 있으면 같이 표기(원하면 제거 가능)
-    var tierLine;
-    if (r.tierName && r.remaining) tierLine = r.tierName + " (" + r.remaining + ")";
-    else if (r.tierName) tierLine = r.tierName;
-    else tierLine = "정보 없음";
-
-    var link = r.url || "https://legacy.lopec.kr";
-
-    var out =
-        r.name + "님의 로펙 정보\n\n" +
-        "스펙 포인트: " + spec + "\n" +
-        "티어: " + tierLine + "\n\n" +
-        link;
-
-    msg.reply(out);
 });

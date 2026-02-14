@@ -1,3 +1,6 @@
+// 2026.02.14 기준 테스트완료
+// 기본 스크립트로 이전 완료
+
 const bot = BotManager.getCurrentBot();
 
 // ★ 모듈 불러오기 (Global_Modules에 'kakaolink' 폴더가 있어야 함)
@@ -40,7 +43,7 @@ tryLogin();
 bot.addListener(Event.MESSAGE, function (msg) {
     if (msg.content.startsWith(".ㄹㅍ ")) {
         var name = msg.content.substr(4).trim();
-        msg.reply(name + " 검색 중... 🚀");
+        msg.reply(name + " 검색 중... ");
 
         new java.lang.Thread(function () {
             try {
@@ -65,6 +68,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
                             "name": d.name,
                             "tier_name": d.tier_name,
                             "score": d.score,
+                            "level": d.item_level,
 
                             // ★ 랭킹 정보 (위/%)
                             "class_rank": d.class_rank,       // 예: 565위
@@ -75,7 +79,9 @@ bot.addListener(Event.MESSAGE, function (msg) {
 
                             // 이미지 정보
                             "char_img": d.char_img || d.tier_img,
-                            "tier_img": d.tier_img
+                            "tier_img": d.tier_img,
+
+                            "class_img": d.class_img
                         }
                     }, 'custom').awaitResult();
 
