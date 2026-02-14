@@ -1,159 +1,167 @@
 const bot = BotManager.getCurrentBot();
-const ALLOWED_ROOMS = ["테스트1", "아크라시아인의 휴식처"];
+const ALLOWED_ROOMS = [];
 
-function save(originpath, content) {
-    var splited_originpath = originpath.split("/");
-    splited_originpath.pop();
-    var path = splited_originpath.join("/");
+// [설정] 건의사항을 받을 관리자 방 이름 (정확해야 합니다!)
+const FEEDBACK_ROOM = "서윤봇 제보방";
 
-    var folder = new java.io.File(path);
-    folder.mkdirs();
+// [설정] 파일 경로
+const SD_ROOT = FileStream.getSdcardPath();
+const FOOD_FILE_PATH = SD_ROOT + "/Sybot/foodList.json";
 
-    var file = new java.io.File(originpath);
-    var fos = new java.io.FileOutputStream(file);
-    var contentstring = new java.lang.String(content);
-    fos.write(contentstring.getBytes());
-    fos.close();
-}
-
-function read(originpath) {
-    var file = new java.io.File(originpath);
-    if (file.exists() == false) return null;
+// [로깅 헬퍼]
+function logCommand(msg, cmdType, arg) {
     try {
-        var fis = new java.io.FileInputStream(file);
-        var isr = new java.io.InputStreamReader(fis);
-        var br = new java.io.BufferedReader(isr);
-
-        // 첫 줄 읽기
-        var temp_br = br.readLine();
-        var temp_readline = "";
-
-        // 나머지 줄 이어 붙이기
-        while ((temp_readline = br.readLine()) !== null) {
-            temp_br += "\n" + temp_readline;
-        }
-
-        try {
-            fis.close();
-            isr.close();
-            br.close();
-            return temp_br;
-        }
-        catch (error) {
-            return error;
-        }
-    }
-    catch (error) {
-        return error;
-    }
-}
-
-// -------------------------
-const FOOD_FILE = "sdcard/Sybot/foodList.json";
-let foodList = [];
-const roomCache = {};
-
-let help = (
-    "--------------------------------\n" +
-    "ㅈㅁㅊ, 점메추, 저메추\n" +
-    "~~ 확률은?\n" +
-    "--------------------------------"
-);
-
-// 스크립트 로드 시점에 파일에서 메뉴 목록 읽기
-function loadFoodList() {
-    try {
-        const text = read(FOOD_FILE);
-        if (!text || typeof text !== "string") {
-            Log.e("[Food] 메뉴 파일을 읽지 못했어요: " + FOOD_FILE);
-            foodList = [];
-            return;
-        }
-
-        const arr = JSON.parse(text);
-
-        if (!Array.isArray(arr)) {
-            Log.e("[Food] 메뉴 파일 형식이 배열이 아니에요.");
-            foodList = [];
-            return;
-        }
-
-        // 문자열만 남기고 양쪽 공백 제거
-        foodList = arr
-            .filter(v => typeof v === "string")
-            .map(v => v.trim())
-            .filter(v => v.length > 0);
-
-        Log.i("[Food] 메뉴 " + foodList.length + "개 로드 완료");
+        Log.i("[" + msg.room + "/" + msg.author.name + "] " + cmdType + ": " + (arg || ""));
     } catch (e) {
-        Log.e("[Food] 메뉴 파일 파싱 실패: " + e);
-        foodList = [];
+        Log.e("로깅 에러: " + e);
     }
 }
-loadFoodList();
 
+// [에러 핸들러]
+function handleError(msg, error, context) {
+    Log.e("[ERROR] " + context + " 실패\n방: " + msg.room + "\n내용: " + error);
+    msg.reply("앗차차! 뭔가 잘못됐어요. 😵");
+}
+
+// 메뉴 데이터 로드
 function getRandomFood() {
-    if (!Array.isArray(foodList) || foodList.length === 0) {
+    try {
+        var list = FileStream.readJson(FOOD_FILE_PATH);
+        if (!list || !Array.isArray(list) || list.length === 0) return null;
+        var idx = Math.floor(Math.random() * list.length);
+        return list[idx];
+    } catch (e) {
+        Log.e("메뉴 데이터 로드 실패: " + e);
         return null;
     }
-    return foodList[Math.floor(Math.random() * foodList.length)];
 }
-function onMessage(msg) {
-    Log.i(`[Log] 메시지 수신: 방='${msg.room}', 보낸 사람='${msg.author.name}', 내용='${msg.content}'`);
 
-    if (!ALLOWED_ROOMS.includes(room)) return;
+/**
+ * [API 2 메인 리스너]
+ */
+bot.addListener(Event.MESSAGE, function (msg) {
+    // 1. 방 제한 체크
+    if (ALLOWED_ROOMS.length > 0 && ALLOWED_ROOMS.indexOf(msg.room) === -1) return;
 
-    const content = msg.content.trim();
+    var content = msg.content.trim();
 
-    var mHelp = content.match(/^\.?명령어$/);
-    if (mHelp) {
+    // ---------------------------------------------------------
+    // 2. 도움말
+    // ---------------------------------------------------------
+    if (content === ".명령어" || content === ".help") {
+        logCommand(msg, "도움말 조회", "");
+        var help = "● 서윤봇 사용설명서\n\n\n" +
+            "1. 로아 관련 기능\n\n" +
+            "   .전투력(ㅈㅌㄹ) : 캐릭터 전투력 조회\n" +
+            "   .낙원력(ㄴㅇㄹ) : 캐릭터 낙원력 조회\n" +
+            "   .로펙(ㄹㅍ) : 캐릭터 로펙 조회\n" +
+            "   .보석(ㅂㅅ) : 캐릭터 보석 조회\n" +
+            "   .팔찌(ㅍㅉ) : 캐릭터 팔찌 조회\n" +
+            "   .아크그리드(ㄱㄹㄷ) : 캐릭터 아크그리드 조회\n\n" +
+            "   .클골(ㅋㄱ) : 레이드 클골(보상) 조회\n" +
+            "   .지옥(ㅈㅇ) : 지옥 강하 추천\n" +
+            "\n\n2. 기타 기능\n\n" +
+            "   .점메추/저메추(ㅈㅁㅊ)\n" +
+            "   A vs B\n" +
+            "   ...확률은?\n" +
+            "\n⋆ 문의/건의사항은 '.봇 내용'으로  보내주세요. 감사합니다." +
+            "\n\n서윤봇은 취미로 개발중인 봇입니다. 아직 부족한 부분이 많아 기능이 항시 작동하지 않을 수 있습니다. 양해 부탁드립니다. "
+            ;
         msg.reply(help);
         return;
     }
 
-    // 메뉴 추천
+    // ---------------------------------------------------------
+    // 3. 메뉴 추천 (.점메추)
+    // ---------------------------------------------------------
     var mMenu = content.match(/^\.?(ㅈㅁㅊ|점메추|저메추)$/);
     if (mMenu) {
-        const food = getRandomFood();
-        if (food) {
-            msg.reply(`🍽️ ${food}`);
-        } else {
-            msg.reply("🍽️ 등록된 메뉴가 없어요. 메뉴 파일을 확인해 주세요!");
+        logCommand(msg, "메뉴 추천", "랜덤");
+        try {
+            const food = getRandomFood();
+            if (food) msg.reply("🍽️ " + food);
+            else {
+                Log.w("[점메추] 파일 없음: " + FOOD_FILE_PATH);
+                msg.reply("🍽️ 메뉴 목록이 없어요.");
+            }
+        } catch (e) { handleError(msg, e, "메뉴 추천"); }
+        return;
+    }
+
+    // ---------------------------------------------------------
+    // 4. VS 게임 (A vs B)
+    // ---------------------------------------------------------
+    var mVs = content.match(/\(([^()]+)\)\s*vs\s*\(([^()]+)\)/i);
+    var mVsPlain = content.match(/^(.+)\s+vs\s+(.+)$/i);
+    var left = null, right = null;
+
+    if (mVs) { left = mVs[1].trim(); right = mVs[2].trim(); }
+    else if (mVsPlain) { left = mVsPlain[1].trim(); right = mVsPlain[2].trim(); }
+
+    if (left && right) {
+        logCommand(msg, "VS 게임", left + " vs " + right);
+        try {
+            var choice = Math.random() < 0.5 ? left : right;
+            msg.reply(choice);
+        } catch (e) { handleError(msg, e, "VS 게임"); }
+        return;
+    }
+
+    // ---------------------------------------------------------
+    // 5. 확률 체크 (...확률은?)
+    // ---------------------------------------------------------
+    if (content.endsWith("확률은?")) {
+        var question = content.replace("확률은?", "").trim();
+        logCommand(msg, "확률 체크", question);
+
+        try {
+            var p = Math.floor(Math.random() * 101);
+
+            // 보낸 사람 이름 가져오기
+            var name = msg.author.name;
+
+            msg.reply(name + "이(가) " + question + " 확률은 " + p + "%...");
+
+        } catch (e) {
+            handleError(msg, e, "확률 체크");
         }
         return;
     }
 
-    var mVs = content.match(/\(([^()]+)\)\s*vs\s*\(([^()]+)\)/i);
-    if (mVs) {
-        var left = mVs[1].trim();
-        var right = mVs[2].trim();
+    // ---------------------------------------------------------
+    // 6. 건의/제보 (.봇 내용) - [bot.send 적용됨!]
+    // ---------------------------------------------------------
+    if (content.startsWith(".봇")) {
+        var feedback = content.replace(/^\.봇\s*/, "").trim();
 
-        var choice = Math.random() < 0.5 ? left : right;
-        msg.reply(choice);
+        if (!feedback) {
+            msg.reply("사용법: .봇 (보낼 내용)\n예: .봇 버그가 있어요!");
+            return;
+        }
+
+        logCommand(msg, "건의사항 접수", feedback);
+
+        try {
+            var reportMsg = "📢 [건의/제보 도착]\n" +
+                "--------------------\n" +
+                "발신: " + msg.room + "\n" +
+                "인물: " + msg.author.name + "\n" +
+                "내용: " + feedback;
+
+            // ★ 핵심 변경: bot.send(방이름, 내용) 사용
+            var success = bot.send(FEEDBACK_ROOM, reportMsg);
+
+            if (success) {
+                msg.reply("소중한 의견 감사합니다! 개발자에게 바로 전송됐어요. 🚀");
+            } else {
+                // 봇이 그 방에 없거나 세션이 끊긴 경우
+                Log.e("전송 실패: '" + FEEDBACK_ROOM + "' 방 세션 없음");
+                msg.reply("전송에 실패했어요. \n@chococo_7로 dm주세요.");
+            }
+
+        } catch (e) {
+            handleError(msg, e, "건의사항 전송");
+        }
         return;
     }
-
-    var mVsPlain = content.match(/^(.+)\s*vs\s*(.+)$/i);
-    if (mVsPlain) {
-        var left2 = mVsPlain[1].trim();
-        var right2 = mVsPlain[2].trim();
-
-        // 둘 중 하나 랜덤 선택
-        var choice2 = Math.random() < 0.5 ? left2 : right2;
-        msg.reply(choice2);
-        return;
-    }
-
-    // 랜덤확률
-    if (msg.content.endsWith("확률은?")) {
-        const prefixes = ["저런!", "음...", "아마도", "과연..", "흠...", "장담할 순 없지만"];
-        const endings = ["!", "ㅋ", "..."];
-        const randomPrefix = prefixes[Math.floor(Math.random() * prefixes.length)];
-        const randomEndings = endings[Math.floor(Math.random() * endings.length)];
-        const randomProbability = (Math.random() * 100).toFixed(1); // 0.0 ~ 100.0%
-
-        msg.reply(`${randomPrefix} 확률은 ${randomProbability}%입니다${randomEndings}`);
-    }
-}
-
-bot.addListener(Event.MESSAGE, onMessage);
+});

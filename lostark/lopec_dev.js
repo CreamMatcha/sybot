@@ -92,7 +92,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
                 }
             } catch (e) {
                 Log.e("에러: " + e);
-                msg.reply("오류 발생: " + e.message);
+                msg.reply("앗차차! 뭔가 잘못됐어요..");
             }
         }).start();
     }

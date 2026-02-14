@@ -6,9 +6,7 @@ bot.setCommandPrefix("."); // 다른 파일에서 이미 설정했다면 중복 
 
 try { Log.i("[LOA] script loaded"); } catch (e) { }
 /***** [설정] 특정 방에서만 동작 *****/
-var ALLOWED_ROOMS = [
-    "아크라시아인의 휴식처"
-];
+var ALLOWED_ROOMS = [];
 
 // 출력 옵션
 const ARK_OPTS = {
@@ -30,6 +28,67 @@ var LOSTARK_BASE = "https://developer-lostark.game.onstove.com";
 
 // 전역 토글
 var LOA_DEBUG = true;
+
+// 로깅 헬퍼 함수: [방이름/보낸사람] 명령어: 인자 형태
+function logCommand(msg, cmdType, arg) {
+    try {
+        // 예: [아크라시아/서윤] 전투력 조회: 닉네임
+        Log.i("[" + msg.room + "/" + msg.author.name + "] " + cmdType + ": " + (arg || ""));
+    } catch (e) {
+        Log.e("로깅 중 에러: " + e);
+    }
+}
+
+function handleApiError(msg, error, context, extraInfo) {
+    var errCode = error;
+    var errStack = "";
+
+    // 만약 error가 진짜 시스템 에러 객체(try-catch의 e)라면 분리
+    if (typeof error === 'object' && error !== null) {
+        errCode = error.message || "UNKNOWN";
+        errStack = error.stack || "";
+    }
+
+    // ----------------------------------------
+    // Case 1: 비즈니스 로직 에러 (사용자에게 친절하게 안내)
+    // ----------------------------------------
+    if (errCode === "NOT_FOUND") {
+        msg.reply("'" + (extraInfo || "캐릭터") + "'를 찾을 수 없어요.");
+        return; // 로그는 굳이 안 남기거나 Info로 남김
+    }
+
+    if (errCode === "HTTP_401" || errCode === "HTTP_403") {
+        msg.reply("인증 오류입니다. API 키를 확인해주세요.");
+        Log.e("[" + context + "] API Key Auth Error");
+        return;
+    }
+
+    if (errCode === "NO_FIELD" || errCode === "MAINTENANCE") {
+        msg.reply("정보를 가져올 수 없어요.");
+        return;
+    }
+
+    if (errCode === "NO_BRACELET") {
+        msg.reply("장착 중인 팔찌가 없거나 정보를 볼 수 없어요.");
+        return;
+    }
+
+    if (errCode === "NO_GEMS") {
+        msg.reply("보석 정보가 없어요. (장착하지 않았거나, 전투정보실 갱신이 필요해요) 💎");
+        return;
+    }
+
+    if (errCode === "NO_EFFECT") {
+        msg.reply("팔찌는 있는데 효과 정보를 읽을 수 없어요. 🤔");
+        return;
+    }
+
+    // ----------------------------------------
+    // Case 2: 진짜 시스템 에러/예외 (개발자용 로그)
+    // ----------------------------------------
+    Log.e("[ERROR] " + context + " 실패\n방: " + msg.room + "\n코드: " + errCode + "\n" + errStack);
+    msg.reply("앗차차! 뭔가 잘못됐어요..");
+}
 
 function httpGetUtf8(urlStr, headersObj) {
     try {
@@ -939,20 +998,17 @@ bot.addListener(Event.MESSAGE, function (msg) {
     var content = (msg.content || "").trim();
 
     // 방 필터
-    if (!isAllowedRoom(room)) {
-        Log.i('[LOA] ignore room="' + room + '" content="' + content + '"');
-        return;
-    }
-
-    Log.i('[LOA] room="' + room + '" msg="' + content + '"');
+    if (!isAllowedRoom(room)) { return; }
 
     // 레이드 보상: ".ㅋㄱ" 또는 "ㅋㄱ"
     // 사용:
     //   .ㅋㄱ                 -> 레이드 목록/사용법
     //   .ㅋㄱ 종막            -> 종막의 모든 난이도 출력
     //   .ㅋㄱ 종막 노말       -> 종막 노말만 출력
-    var mRR = content.match(/^(?:\.?ㅋㄱ)(?:\s+(.+))?$/);
+    var mRR = content.match(/^(?:\.?ㅋㄱ|\.클골)(?:\s+(.+))?$/);
     if (mRR) {
+        logCommand(msg, "레이드 보상 조회", charName);
+
         var db = loadRaidRewards();
         if (!db) {
             msg.reply("레이드 보상 파일을 찾지 못했어요.\n경로: " + RAID_REWARD_FILE);
@@ -1024,13 +1080,19 @@ bot.addListener(Event.MESSAGE, function (msg) {
     var mCP = content.match(/^(?:\.?ㅈㅌㄹ|\.전투력)\s+(\S+)$/);
     if (mCP) {
         var charCP = mCP[1];
-        Log.i("[LOA] command CP char=" + charCP);
-        var r1 = fetchCombatPower(charCP);
-        if (r1.ok) msg.reply(r1.name + "의\n\n⚔전투력: " + r1.combatPower);
-        else if (r1.reason === "NOT_FOUND") msg.reply("'" + charCP + "' 캐릭터를 찾을 수 없어요.");
-        else if (r1.reason === "HTTP_401" || r1.reason === "HTTP_403") msg.reply("인증 오류입니다. API 키를 확인해주세요.");
-        else if (r1.reason === "NO_FIELD") msg.reply("몰루? 아마도 점검중?");
-        else msg.reply("전투력 조회 실패 (" + (r1.reason || "ERROR") + ")");
+        logCommand(msg, "전투력 조회", charCP);
+
+        try {
+            var r1 = fetchCombatPower(charCP);
+
+            if (r1.ok) {
+                msg.reply(r1.name + "의\n\n⚔전투력: " + r1.combatPower);
+            } else {
+                handleApiError(msg, r1.reason, "전투력 조회", charCP);
+            }
+        } catch (e) {
+            handleApiError(msg, e, "전투력 조회", charCP);
+        }
         return;
     }
 
@@ -1038,84 +1100,73 @@ bot.addListener(Event.MESSAGE, function (msg) {
     var mPP = content.match(/^(?:\.낙원력|\.?ㄴㅇㄹ)\s+(\S+)$/);
     if (mPP) {
         var charPP = mPP[1];
-        Log.i("[LOA] command PP char=" + charPP);
+        logCommand(msg, "낙원력 조회", charCP);
 
-        var r2 = fetchParadisePower(charPP);
-        if (r2.ok) {
-            msg.reply(r2.name + "의\n\n⭐낙원력: " + formatManKorean(r2.paradisePower));
-        } else if (r2.reason === "NOT_FOUND") {
-            msg.reply("'" + charPP + "' 캐릭터를 찾을 수 없어요.");
-        } else if (r2.reason === "HTTP_401" || r2.reason === "HTTP_403") {
-            msg.reply("인증 오류입니다. API 키를 확인해주세요.");
-        } else if (r2.reason === "NO_EQUIP") {
-            msg.reply("몰루?");
-        } else if (r2.reason === "NO_ORB") {
-            msg.reply("보주 장비를 찾을 수 없어요.");
-        } else if (r2.reason === "NO_TOOLTIP") {
-            msg.reply("보주 Tooltip 정보가 없어요.");
-        } else if (r2.reason === "NO_VALUE") {
-            msg.reply("Tooltip에서 낙원력을 찾지 못했어요.");
-        } else if (r2.reason === "PARSE_ERROR") {
-            msg.reply("Tooltip 파싱 중 오류가 발생했어요.");
-        } else {
-            msg.reply("낙원력 조회 실패 (" + (r2.reason || "ERROR") + ")");
+        try {
+            var r2 = fetchParadisePower(charPP);
+            if (r2.ok) {
+                msg.reply(r2.name + "의\n\n⭐낙원력: " + formatManKorean(r2.paradisePower) + "\n※ 시즌1 보주를 착용하고 있을 경우 시즌1로 표시됩니다.");
+            } else {
+                handleApiError(msg, r1.reason, "낙원력 조회", charCP);
+            }
+        } catch (e) {
+            handleApiError(msg, e, "낙원력 조회", charCP);
         }
         return;
     }
 
     // 아크그리드
-    var mAG = content.match(/^(?:\.?ㄱㄹㄷ|\.아크그리드|\.?arkgrid)\s+(\S+)$/);
+    var mAG = content.match(/^(?:\.?ㄱㄹㄷ|\.아크그리드)\s+(\S+)$/);
     if (mAG) {
-        var cg = mAG[1];
-        Log.i("[LOA] command ARKGRID char=" + cg);
+        var charAG = mAG[1];
 
-        // 직업명 (옵션)
-        var cls = fetchProfileClassName(cg);
+        // [로깅]
+        logCommand(msg, "아크그리드 조회", charAG);
 
-        var r3 = fetchArkGrid(cg);
-        if (!r3 || !r3.ok) {
-            if (r3 && r3.reason === "NOT_FOUND") {
-                msg.reply("'" + cg + "' 캐릭터를 찾을 수 없어요.");
-            } else if (r3 && r3.reason && r3.reason.indexOf("HTTP_") === 0) {
-                msg.reply("인증/네트워크 오류입니다. ( " + r3.reason + " )");
-            } else if (r3 && r3.reason === "PARSE_ERROR") {
-                msg.reply("아크 그리드 응답 파싱 중 오류가 발생했어요.");
+        try {
+            var cls = fetchProfileClassName(charAG);
+
+            var r3 = fetchArkGrid(charAG);
+
+            if (r3 && r3.ok) {
+                // [성공]
+                if (cls) r3.ClassName = cls; // 헤더 정보 보강
+                var out = renderArkGridView(r3);
+                msg.reply(out);
             } else {
-                msg.reply("아크 그리드 조회 실패 (" + ((r3 && r3.reason) || "ERROR") + ")");
+                var reason = (r3 && r3.reason) ? r3.reason : "UNKNOWN";
+                handleApiError(msg, reason, "아크그리드 조회", charAG);
             }
-            return;
+        } catch (e) {
+            // [시스템 에러]
+            handleApiError(msg, e, "아크그리드 조회", charAG);
         }
-
-        // 헤더 정보 보강
-        if (cls) r3.ClassName = cls;
-
-        // 요청한 포맷으로 렌더
-        var out = renderArkGridView(r3);
-        msg.reply(out);
         return;
     }
 
     // 보석
     var mGEM = content.match(/^(?:\.보석|\.ㅂㅅ)\s+(\S+)$/);
     if (mGEM) {
-        var cg2 = mGEM[1];
-        Log.i("[LOA] command GEMS char=" + cg2);
+        var charGem = mGEM[1];
 
-        var cls2 = fetchProfileClassName(cg2);
-        var rG = fetchGems(cg2);
+        logCommand(msg, "보석 조회", charGem);
 
-        if (!rG || !rG.ok) {
-            if (rG && rG.reason === "NOT_FOUND") msg.reply("'" + cg2 + "' 캐릭터를 찾을 수 없어요.");
-            else if (rG && rG.reason && rG.reason.indexOf("HTTP_") === 0) msg.reply("인증/네트워크 오류입니다. ( " + rG.reason + " )");
-            else if (rG && rG.reason === "PARSE_ERROR") msg.reply("보석 응답 파싱 중 오류가 발생했어요.");
-            else if (rG && rG.reason === "NO_GEMS") msg.reply("보석 정보가 없어요.");
-            else msg.reply("보석 조회 실패 (" + ((rG && rG.reason) || "ERROR") + ")");
-            return;
+        try {
+            var cls2 = fetchProfileClassName(charGem);
+
+            var rG = fetchGems(charGem);
+
+            if (rG && rG.ok) {
+                // [성공]
+                if (cls2) rG.ClassName = cls2;
+                msg.reply(renderGemsView(rG));
+            } else {
+                var reason = (rG && rG.reason) ? rG.reason : "UNKNOWN";
+                handleApiError(msg, reason, "보석 조회", charGem);
+            }
+        } catch (e) {
+            handleApiError(msg, e, "보석 조회", charGem);
         }
-
-        if (cls2) rG.ClassName = cls2;
-
-        msg.reply(renderGemsView(rG));
         return;
     }
 
@@ -1123,19 +1174,23 @@ bot.addListener(Event.MESSAGE, function (msg) {
     var mBR = content.match(/^(?:\.팔찌|\.?ㅍㅉ)\s+(\S+)$/);
     if (mBR) {
         var charBR = mBR[1];
-        Log.i("[LOA] command BR char=" + charBR);
 
-        var rBR = fetchBracelet(charBR);
-        if (rBR.ok) {
-            msg.reply(rBR.name + "의 팔찌\n\n" + rBR.content);
-        } else if (rBR.reason === "NOT_FOUND") {
-            msg.reply("'" + charBR + "' 캐릭터를 찾을 수 없어요.");
-        } else if (rBR.reason === "NO_BRACELET") {
-            msg.reply("장착 중인 팔찌가 없거나 정보를 가져올 수 없어요.");
-        } else if (rBR.reason === "NO_EFFECT") {
-            msg.reply("팔찌 효과 정보를 찾을 수 없어요.");
-        } else {
-            msg.reply("팔찌 조회 실패 (" + (rBR.reason || "ERROR") + ")");
+        logCommand(msg, "팔찌 조회", charBR);
+
+        try {
+            var rBR = fetchBracelet(charBR);
+
+            if (rBR && rBR.ok) {
+                // [성공]
+                msg.reply(rBR.name + "의 팔찌\n\n" + rBR.content);
+            } else {
+                // [실패] 핸들러에게 위임
+                var reason = (rBR && rBR.reason) ? rBR.reason : "UNKNOWN";
+                handleApiError(msg, reason, "팔찌 조회", charBR);
+            }
+        } catch (e) {
+            // [시스템 에러]
+            handleApiError(msg, e, "팔찌 조회", charBR);
         }
         return;
     }
@@ -1144,27 +1199,38 @@ bot.addListener(Event.MESSAGE, function (msg) {
     var hellMatch = content.match(/^(?:\.ㅈㅇ|\.지옥|ㅈㅇ)\s*(\d+)?/);
 
     if (hellMatch) {
-        let count = parseInt(hellMatch[1]);
+        var rawCount = hellMatch[1];
 
-        // 숫자가 입력되지 않았을 경우 기본값 1회 설정
-        if (isNaN(count)) {
-            count = 1;
-        }
+        try {
+            let count = parseInt(rawCount);
 
-        if (count > 30) {
-            msg.reply("지옥은 최대 30번까지만 갈 수 있어요! (30회로 실행합니다)");
-            count = 30;
-        } else if (count <= 0) {
-            msg.reply("지옥에 가려면 1 이상의 숫자를 입력해주세요.");
-            return;
-        }
+            // 숫자가 입력되지 않았을 경우 기본값 1회 설정
+            if (isNaN(count)) {
+                count = 1;
+            }
 
-        let result = [];
-        for (let i = 0; i < count; i++) {
-            let direction = Math.random() < 0.5 ? "좌" : "우";
-            result.push((i + 1) + ". " + direction);
+            logCommand(msg, "지옥 시뮬레이션", count + "회");
+
+            // 횟수 제한 로직
+            if (count > 10) {
+                msg.reply("지옥은 최대 10번까지만 갈 수 있어요! (10회로 실행합니다)");
+                count = 30;
+            } else if (count <= 0) {
+                msg.reply("지옥에 가려면 1 이상의 숫자를 입력해주세요.");
+                return;
+            }
+
+            let result = [];
+            for (let i = 0; i < count; i++) {
+                let direction = Math.random() < 0.5 ? "좌" : "우";
+                result.push((i + 1) + ". " + direction);
+            }
+            msg.reply(result.join("\n"));
+
+        } catch (e) {
+            // [시스템 에러]
+            handleApiError(msg, e, "지옥 시뮬레이션");
         }
-        msg.reply(result.join("\n"));
     }
 });
 
