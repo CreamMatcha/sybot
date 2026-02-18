@@ -5,7 +5,7 @@
       "하드": [
         {
           "gate": 1,
-          "gold": 14000,
+          "gold": 17500,
           "moreGold": 5600,
           "clear": [
             {
@@ -22,7 +22,7 @@
         },
         {
           "gate": 2,
-          "gold": 21000,
+          "gold": 26500,
           "moreGold": 8480,
           "clear": [
             {
@@ -41,14 +41,14 @@
       "노말": [
         {
           "gate": 1,
-          "gold": 17500,
+          "gold": 14000,
           "moreGold": 4480,
           "clear": [],
           "more": []
         },
         {
           "gate": 2,
-          "gold": 26500,
+          "gold": 21000,
           "moreGold": 6720,
           "clear": [],
           "more": []
@@ -136,13 +136,13 @@
           "clear": [
             {
               "name": "코어",
-              "qty": 1
+              "qty": 2
             }
           ],
           "more": [
             {
               "name": "코어",
-              "qty": 1
+              "qty": 2
             }
           ]
         },
@@ -153,13 +153,13 @@
           "clear": [
             {
               "name": "코어",
-              "qty": 1
+              "qty": 2
             }
           ],
           "more": [
             {
               "name": "코어",
-              "qty": 1
+              "qty": 2
             }
           ]
         }

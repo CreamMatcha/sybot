@@ -17,9 +17,10 @@ function dbg() { if (ARK_OPTS.log) try { Log.i.apply(Log, ["[ARK]"].concat([].sl
 
 function isAllowedRoom(roomName) {
     try {
-        if (!ALLOWED_ROOMS || ALLOWED_ROOMS.length === 0) return true; // 목록 비어있으면 전부 허용
-        return ALLOWED_ROOMS.indexOf(String(roomName)) !== -1;
-    } catch (_) { return true; } // 테스트 편의: 오류시에도 통과
+        if (!ALLOWED_ROOMS || ALLOWED_ROOMS.length === 0) return true;
+        var r = String(roomName || ""); // null 방지
+        return ALLOWED_ROOMS.indexOf(r) !== -1;
+    } catch (_) { return true; }
 }
 
 // API 키
@@ -28,6 +29,10 @@ var LOSTARK_BASE = "https://developer-lostark.game.onstove.com";
 
 // 전역 토글
 var LOA_DEBUG = true;
+
+// 파일 경로
+const RAID_REWARD_FILE = "sdcard/Sybot/raid_rewards.json";
+let _raidRewardCache = null;
 
 // 로깅 헬퍼 함수: [방이름/보낸사람] 명령어: 인자 형태
 function logCommand(msg, cmdType, arg) {
@@ -74,12 +79,12 @@ function handleApiError(msg, error, context, extraInfo) {
     }
 
     if (errCode === "NO_GEMS") {
-        msg.reply("보석 정보가 없어요. (장착하지 않았거나, 전투정보실 갱신이 필요해요) 💎");
+        msg.reply("해당 캐릭터는 보석을 착용하고 있지 않습니다.");
         return;
     }
 
-    if (errCode === "NO_EFFECT") {
-        msg.reply("팔찌는 있는데 효과 정보를 읽을 수 없어요. 🤔");
+    if (errCode === "NO_BRACELET") {
+        msg.reply("해당 캐릭터는 팔찌를 착용하고 있지 않습니다.");
         return;
     }
 
@@ -91,13 +96,16 @@ function handleApiError(msg, error, context, extraInfo) {
 }
 
 function httpGetUtf8(urlStr, headersObj) {
+    var conn = null;
+    var br = null;
     try {
         var url = new java.net.URL(urlStr);
-        var conn = url.openConnection();
+        conn = url.openConnection();
         conn.setConnectTimeout(8000);
         conn.setReadTimeout(8000);
-        // 헤더 세팅
         conn.setRequestProperty("accept", "application/json");
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Sybot_MessengerBot)");
+
         if (headersObj) {
             for (var k in headersObj) {
                 if (Object.prototype.hasOwnProperty.call(headersObj, k)) {
@@ -105,25 +113,26 @@ function httpGetUtf8(urlStr, headersObj) {
                 }
             }
         }
-        // 응답 코드 확인
+
         var code = conn.getResponseCode();
         var isOK = (code >= 200 && code < 300);
         var stream = isOK ? conn.getInputStream() : conn.getErrorStream();
-        if (stream == null) {
-            Log.e("[LOA] null stream, code=" + code);
-            return { ok: false, code: code, text: null };
-        }
+
+        if (stream == null) return { ok: false, code: code, text: null };
+
         var isr = new java.io.InputStreamReader(stream, "UTF-8");
-        var br = new java.io.BufferedReader(isr);
+        br = new java.io.BufferedReader(isr);
         var sb = new java.lang.StringBuilder();
         var line;
         while ((line = br.readLine()) !== null) sb.append(line).append('\n');
-        br.close(); isr.close();
-        var txt = String(sb.toString());
-        return { ok: isOK, code: code, text: txt };
+
+        return { ok: isOK, code: code, text: String(sb.toString()) };
     } catch (e) {
         Log.e("[LOA] httpGetUtf8 ERROR: " + e);
         return { ok: false, code: -1, text: null, err: String(e) };
+    } finally {
+        if (br != null) try { br.close(); } catch (e) { }
+        if (conn != null) try { conn.disconnect(); } catch (e) { }
     }
 }
 
@@ -316,31 +325,32 @@ function fetchBracelet(charNameRaw) {
     var charName = String(charNameRaw);
     var url = LOSTARK_BASE + "/armories/characters/" + charName + "/equipment";
 
-    var t0 = java.lang.System.currentTimeMillis();
     var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
-    var dt = java.lang.System.currentTimeMillis() - t0;
-
     if (!res.ok) {
-        Log.e("[LOA] BR HTTP FAIL code=" + res.code + " ms=" + dt + " url=" + url);
         if (res.code === 404) return { ok: false, reason: "NOT_FOUND" };
         return { ok: false, reason: "HTTP_" + res.code };
     }
 
-    var body = res.text || "";
     var arr;
     try {
-        arr = JSON.parse(body);
+        arr = JSON.parse(res.text);
     } catch (e) {
-        Log.e("[LOA] BR JSON parse error: " + e);
         return { ok: false, reason: "PARSE_ERROR" };
     }
 
-    if (!arr || !arr.length) return { ok: false, reason: "NO_EQUIP" };
+    // 장비 정보가 아예 없거나 배열이 비어있는 경우
+    if (!arr || arr.length === 0) return { ok: false, reason: "NO_BRACELET" };
 
     var bracelet = null;
     for (var i = 0; i < arr.length; i++) {
-        if (arr[i] && arr[i].Type === "팔찌") { bracelet = arr[i]; break; }
+        // 배열을 다 뒤져도 Type이 "팔찌"인 게 없으면 bracelet은 null로 남음
+        if (arr[i] && arr[i].Type === "팔찌") {
+            bracelet = arr[i];
+            break;
+        }
     }
+
+    // 루프가 끝났는데 팔찌를 못 찾은 경우 (사용자 질문의 케이스)
     if (!bracelet) return { ok: false, reason: "NO_BRACELET" };
 
     try {
@@ -419,7 +429,7 @@ function tooltipToPlainText(html) {
 }
 
 function parseTooltipJSON(tooltipStr) {
-    try { return JSON.parse(String(tooltipStr)); } catch { return null; }
+    try { return JSON.parse(String(tooltipStr)); } catch (e) { return null; }
 }
 function findItemPartBoxValueByTitle(tipObj, titleText) {
     if (!tipObj) return null;
@@ -457,17 +467,6 @@ function formatCoreLine(slot) {
     var type = getCoreTypeFromTooltip(slot.Tooltip);  // "혼돈 - 해"
     var title = getCoreDisplayName(slot.Name);        // "현란한 공격"
     return "[" + slot.Grade + "]" + type + " : " + title + "[" + slot.Point + "P]";
-}
-function formatEffects(effects) {
-    var lines = ["\n❙ 아크 그리드 젬 효과"];
-    for (var i = 0; i < effects.length; i++) {
-        var eff = effects[i];
-        var plain = tooltipToPlainText(eff.Tooltip || "");
-        var m = plain.match(/([+\-]?\d+(?:\.\d+)?)\s*%/);
-        var pct = m ? ("+" + m[1] + "%") : plain.replace(eff.Name, "").trim();
-        lines.push(eff.Name + " " + eff.Level + "Lv [" + pct + "]");
-    }
-    return lines.join("\n");
 }
 function formatCoreActivationList(slots) {
     var out = [];
@@ -630,7 +629,8 @@ function fetchGems(charNameRaw) {
     var gems = (data && data.Gems) ? data.Gems : null;
     var eff = (data && data.Effects) ? data.Effects : null;
 
-    if (!gems || !gems.length) return { ok: false, reason: "NO_GEMS" };
+    // Gems가 null이거나 배열 길이가 0인 경우 착용하지 않은 것으로 간주
+    if (gems === null || gems.length === 0) return { ok: false, reason: "NO_GEMS" };
 
     return { ok: true, name: charName, Gems: gems, Effects: eff };
 }
@@ -710,19 +710,21 @@ var CLASS_SHORT = {
     "가디언나이트": "가나"
 };
 
-// 3글자 이하 + (원하면) 2글자는 보기 좋게 한 칸 벌림
-function formatClassCompact(cls) {
-    cls = String(cls || "미확인").trim();
-    var short = CLASS_SHORT[cls] || cls;
+/**
+ * CLASS_SHORT를 사용하여 직업명을 3글자 폭으로 변환 (GraalJS)
+ */
+const formatClassCompact = (className) => {
+    // 1. 매핑 테이블에서 별명 가져오기 (없으면 원본 사용)
+    let shortName = CLASS_SHORT[className] || className;
 
-    // 혹시 모르는 직업명은 3글자까지만 (안전장치)
-    if (short.length > 3) short = short.slice(0, 3);
+    // 2. 2글자인 경우 가운데 공백 추가 (바드 -> 바 드)
+    if (shortName.length === 2) {
+        return shortName[0] + " " + shortName[1];
+    }
 
-    // 출력 폭 맞추고 싶으면(선택): 2글자면 가운데 전각공백 넣어서 3칸처럼 보이게
-    if (short.length === 2) return short[0] + "\u3000" + short[1];
-    if (short.length === 1) return short + "\u3000\u3000";
-    return short;
-}
+    // 3. 3글자 이상인 경우 그대로 혹은 잘라서 반환
+    return shortName.length > 3 ? shortName.substring(0, 3) : shortName;
+};
 
 // Skills[].Description/Option/Tooltip 등에서 판정에 쓸 텍스트를 합쳐서 반환
 function collectGemEffectText(skillObj) {
@@ -740,17 +742,18 @@ function collectGemEffectText(skillObj) {
 
 // 광휘를 작/겁으로 분류: "피해 n% 증가" => 겁, "재사용 대기시간 n% 감소" => 작
 function classifyGlowAsJakOrGeop(skillObj) {
-    var t = collectGemEffectText(skillObj);
-
-    // 겁화 판정(피해 증가)
+    if (!skillObj) return null;
+    var descText = "";
+    if (Array.isArray(skillObj.Description)) {
+        descText = skillObj.Description.join(" ");
+    } else if (skillObj.Description) {
+        descText = String(skillObj.Description);
+    }
+    var t = (descText + " " + (skillObj.Option || "") + " " + (skillObj.Tooltip || "")).replace(/<[^>]*>/g, "");
     if (t.indexOf("피해") !== -1 && t.indexOf("증가") !== -1) return "겁";
-
-    // 작열 판정(쿨감)
     if (t.indexOf("재사용") !== -1 && t.indexOf("대기시간") !== -1 && t.indexOf("감소") !== -1) return "작";
-
-    return null; // 판정 실패
+    return null;
 }
-
 
 function renderGemsView(model) {
     // model: { name, ClassName, Gems:[], Effects:{} }
@@ -827,7 +830,11 @@ function renderGemsView(model) {
     function typeOrder(t) { return (t === "작") ? 0 : (t === "겁" ? 1 : 9); }
     rows.sort(function (a, b) {
         if (b.lv !== a.lv) return b.lv - a.lv;
-        return typeOrder(a.type) - typeOrder(b.type);
+        var p = { "작": 1, "겁": 2, "광": 3, "?": 4 };
+        var priorityA = p[a.type] || 9;
+        var priorityB = p[b.type] || 9;
+        if (priorityA !== priorityB) return priorityA - priorityB;
+        return 0;
     });
 
     var avgLv = total ? (sumLv / total) : 0;
@@ -847,8 +854,6 @@ function renderGemsView(model) {
     return out.join("\n");
 }
 
-
-// 최종 렌더
 function renderArkGridView(model) {
     // model: { Nickname, ClassName, Slots:[], Effects:[] }
     var head = "◦ " + (model.Nickname || model.name || "") + "(" + (model.ClassName || "미확인") + ")의 아크그리드";
@@ -865,8 +870,6 @@ function renderArkGridView(model) {
  *  스키마: { version:1, raids: { [레이드명]: { [난이도]: [ {gate,gold,moreGold,clear[],more[]} ] } } }
  * ─────────────────────────────────────────*****/
 
-const RAID_REWARD_FILE = "sdcard/Sybot/raid_rewards.json";
-let _raidRewardCache = null;
 
 // UTF-8 읽기 (이모지/한글 안전)
 function readTextUtf8(path) {
@@ -944,7 +947,7 @@ function mapToText(mapObj) {
 
 function renderRaidBlock(raidName, diffName, gateList) {
     var lines = [];
-    lines.push("◦" + raidName + " " + diffName);
+    lines.push("◦ " + raidName + " " + diffName);
 
     var sumGold = 0;
     var sumMoreGold = 0;
@@ -992,6 +995,66 @@ function findRaidCandidates(db, raidQuery) {
 }
 
 
+/**
+ * 캐릭터의 원정대(부캐) 목록을 가져와서 정렬하는 함수
+ */
+const fetchSiblings = (characterName) => {
+    const cleanName = characterName.trim();
+    const baseUrl = "https://developer-lostark.game.onstove.com";
+    const apiUrl = `${baseUrl}/characters/${encodeURIComponent(cleanName)}/siblings`;
+
+    try {
+        const url = new java.net.URL(apiUrl);
+        const conn = url.openConnection();
+        conn.setRequestMethod("GET");
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(5000);
+        conn.setRequestProperty("authorization", "bearer " + LOSTARK_API_KEY);
+        conn.setRequestProperty("accept", "application/json");
+
+        const responseCode = conn.getResponseCode();
+        if (responseCode !== 200) return { ok: false, reason: "API_ERROR", detail: `HTTP ${responseCode}` };
+
+        const is = conn.getInputStream();
+        const br = new java.io.BufferedReader(new java.io.InputStreamReader(is, "UTF-8"));
+        let responseData = "";
+        let line;
+        while ((line = br.readLine()) !== null) responseData += line;
+        br.close();
+
+        if (!responseData || responseData === "null") return { ok: false, reason: "NOT_FOUND" };
+
+        const data = JSON.parse(responseData);
+        if (!Array.isArray(data)) return { ok: false, reason: "NOT_FOUND" };
+
+        const targetChar = data.find(c => c.CharacterName === cleanName);
+        const targetServer = targetChar ? targetChar.ServerName : data[0].ServerName;
+
+        const sortedData = data.slice().sort((a, b) => {
+            if (a.ServerName === targetServer && b.ServerName !== targetServer) return -1;
+            if (a.ServerName !== targetServer && b.ServerName === targetServer) return 1;
+            return parseFloat(String(b.ItemAvgLevel).replace(/,/g, "")) - parseFloat(String(a.ItemAvgLevel).replace(/,/g, ""));
+        });
+
+        let content = `◦ ${targetServer} 서버\n`;
+        let currentServer = targetServer;
+
+        sortedData.forEach(char => {
+            if (char.ServerName !== currentServer) {
+                currentServer = char.ServerName;
+                content += `\n˙◦ ${currentServer} 서버\n`;
+            }
+
+            // [적용] 제공해주신 CLASS_SHORT 기반의 컴팩트 포맷
+            const compactClass = formatClassCompact(char.CharacterClassName);
+            content += `[${compactClass}] ${char.CharacterName} (${char.ItemAvgLevel})\n`;
+        });
+
+        return { ok: true, content: content.trim() };
+    } catch (e) {
+        return { ok: false, reason: "SYSTEM_ERROR", detail: e.message };
+    }
+};
 // ── 메시지 리스너: "ㅈㅌㄹ 캐릭명"
 bot.addListener(Event.MESSAGE, function (msg) {
     var room = msg.room || "";
@@ -1007,7 +1070,8 @@ bot.addListener(Event.MESSAGE, function (msg) {
     //   .ㅋㄱ 종막 노말       -> 종막 노말만 출력
     var mRR = content.match(/^(?:\.?ㅋㄱ|\.클골)(?:\s+(.+))?$/);
     if (mRR) {
-        logCommand(msg, "레이드 보상 조회", charName);
+        var arg = (mRR[1] || "").trim(); // 인잣값을 먼저 변수에 할당
+        logCommand(msg, "레이드 보상 조회", arg); // charName 대신 arg를 사용하도록 수정
 
         var db = loadRaidRewards();
         if (!db) {
@@ -1015,7 +1079,6 @@ bot.addListener(Event.MESSAGE, function (msg) {
             return;
         }
 
-        var arg = (mRR[1] || "").trim();
         if (!arg) {
             var raidNames = Object.keys(db.raids || {}).sort();
             msg.reply(
@@ -1107,7 +1170,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
             if (r2.ok) {
                 msg.reply(r2.name + "의\n\n⭐낙원력: " + formatManKorean(r2.paradisePower) + "\n※ 시즌1 보주를 착용하고 있을 경우 시즌1로 표시됩니다.");
             } else {
-                handleApiError(msg, r1.reason, "낙원력 조회", charCP);
+                handleApiError(msg, r2.reason, "낙원력 조회", charCP);
             }
         } catch (e) {
             handleApiError(msg, e, "낙원력 조회", charCP);
@@ -1231,6 +1294,35 @@ bot.addListener(Event.MESSAGE, function (msg) {
             // [시스템 에러]
             handleApiError(msg, e, "지옥 시뮬레이션");
         }
+    }
+
+    // 원정대 부캐 조회 명령어
+    const mAlt = content.match(/^(?:\.ㅂㅋ|\.부캐|ㅂㅋ)\s+(\S+)$/);
+
+    if (mAlt) {
+        const charAlt = mAlt[1];
+
+        if (isAllowedRoom(room)) {
+            logCommand(msg, "원대 조회", charAlt);
+
+            try {
+                const rAlt = fetchSiblings(charAlt);
+
+                if (rAlt && rAlt.ok) {
+                    msg.reply(rAlt.content);
+                } else {
+                    const altReason = rAlt ? rAlt.reason : "UNKNOWN";
+                    if (altReason === "NOT_FOUND") {
+                        msg.reply(`${charAlt} 캐릭터를 찾을 수 없어요. (닉네임을 확인해주세요)`);
+                    } else {
+                        handleApiError(msg, altReason, "원대 조회", charAlt);
+                    }
+                }
+            } catch (e) {
+                handleApiError(msg, e.message, "원대 조회", charAlt);
+            }
+        }
+        return;
     }
 });
 

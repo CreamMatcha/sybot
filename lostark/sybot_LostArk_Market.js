@@ -12,52 +12,39 @@ const ALLOWED_ROOMS = ["테스트1"];
 /************************************************************
  * [유틸] HTTP POST 요청 함수 (거래소 조회용)
  ************************************************************/
-function httpPost(url, headers, bodyJson) {
+function httpPost(urlStr, headers, bodyObj) {
+    var conn = null;
     try {
-        var u = new java.net.URL(url);
-        var con = u.openConnection();
+        var url = new java.net.URL(urlStr);
+        conn = url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setDoOutput(true);
+        conn.setConnectTimeout(5000);
+        conn.setReadTimeout(5000);
 
-        con.setRequestMethod("POST");
-        con.setConnectTimeout(5000);
-        con.setReadTimeout(5000);
-        con.setDoOutput(true); // Body 전송 활성화
-
-        // 헤더 설정
-        for (var key in headers) {
-            con.setRequestProperty(key, headers[key]);
+        for (var k in headers) {
+            conn.setRequestProperty(k, headers[k]);
         }
 
-        // Body 쓰기
-        var os = con.getOutputStream();
-        var writer = new java.io.OutputStreamWriter(os, "UTF-8");
-        writer.write(bodyJson);
+        var os = conn.getOutputStream();
+        var writer = new java.io.BufferedWriter(new java.io.OutputStreamReader(os, "UTF-8"));
+        writer.write(JSON.stringify(bodyObj));
         writer.flush();
         writer.close();
-        os.close();
 
-        // 응답 코드 확인
-        var responseCode = con.getResponseCode();
+        var code = conn.getResponseCode();
+        var stream = (code >= 200 && code < 300) ? conn.getInputStream() : conn.getErrorStream();
+        var reader = new java.io.BufferedReader(new java.io.InputStreamReader(stream, "UTF-8"));
+        var response = "";
+        var line;
+        while ((line = reader.readLine()) !== null) response += line;
+        reader.close();
 
-        // 응답 읽기
-        var br;
-        if (responseCode >= 200 && responseCode < 300) {
-            br = new java.io.BufferedReader(new java.io.InputStreamReader(con.getInputStream(), "UTF-8"));
-        } else {
-            br = new java.io.BufferedReader(new java.io.InputStreamReader(con.getErrorStream(), "UTF-8"));
-        }
-
-        var inputLine;
-        var response = new java.lang.StringBuffer();
-        while ((inputLine = br.readLine()) != null) {
-            response.append(inputLine);
-        }
-        br.close();
-
-        return { code: responseCode, body: response.toString() };
-
+        return { code: code, body: response };
     } catch (e) {
-        Log.e("HTTP POST Error: " + e);
-        return { code: -1, body: null, error: e };
+        return { code: -1, body: e.toString() };
+    } finally {
+        if (conn != null) conn.disconnect();
     }
 }
 
@@ -111,7 +98,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
                 }
 
                 // 결과 메시지 만들기 (Top 10만 출력)
-                var resultMsg = " ‧ 유각 시세 Top 10\n\n";
+                var resultMsg = "◦ 유각 시세 Top 10\n\n";
 
                 var limit = Math.min(items.length, 10);
                 for (var i = 0; i < limit; i++) {

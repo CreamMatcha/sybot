@@ -1,9 +1,6 @@
 const bot = BotManager.getCurrentBot();
 
-// 모듈 불러오기 (Global_Modules에 'kakaolink' 폴더가 있어야 함)
-const { KakaoApiService, KakaoShareClient } = require('kakaolink');
-
-// 카카오 디벨로퍼스 설정
+// ★ 카카오 디벨로퍼스 설정
 const SERVER_URL = "http://34.64.244.233:3101/search";
 
 const JS_KEY = "63ccd6c2bfe4e0b189d6d2eeeac77584";
@@ -12,24 +9,33 @@ const DOMAIN = "https://google.com";
 
 const TEMPLATE_ID = 129396;
 
-// 서비스 & 클라이언트 생성
+// [설정] 카카오링크 모듈 불러오기 (GraalJS 방식)
+const { KakaoApiService, KakaoShareClient } = require('kakaolink');
+
+// [설정] Java 클래스 불러오기 (GraalJS 필수)
+const Jsoup = Java.type("org.jsoup.Jsoup");
+const Thread = Java.type("java.lang.Thread");
+
+// [초기화] 서비스 & 클라이언트 생성
 const service = KakaoApiService.createService();
 const client = KakaoShareClient.createClient();
 
-// 로그인 (한 번만 실행하면 됨 - 세션 유지)
+// [로그인] 세션 쿠키 관리
 let loginCookies = null;
 
 function tryLogin() {
     try {
-        // 알아서 카톡 앱 정보를 읽어서 로그인 시도
+        Log.i("🔄 카카오링크 로그인 시도 중...");
+
+        // 예제 코드 기반 로그인
         loginCookies = service.login({
             signInWithKakaoTalk: true,
-            context: App.getContext() // 모듈이 알아서 처리함
+            context: App.getContext() // 만약 'App is not defined' 에러가 나면 Api.getContext()로 변경
         }).awaitResult();
 
-        Log.i("✅ 카카오링크 자동 로그인 성공!");
+        Log.i("✅ 카카오링크 로그인 성공!");
     } catch (e) {
-        Log.e("⚠️ 로그인 실패 (수동 로그인 필요할 수 있음): " + e);
+        Log.e("⚠️ 로그인 실패: " + e);
     }
 }
 
@@ -37,59 +43,65 @@ function tryLogin() {
 tryLogin();
 
 
+// [메인] 메시지 리스너
 bot.addListener(Event.MESSAGE, function (msg) {
-    if (msg.content.startsWith(".ㄹㅍ ")) {
-        var name = msg.content.substr(4).trim();
-        msg.reply(name + " 검색 중... ");
+    if (msg.content.startsWith(".ㄹㅍ ") || msg.content.startsWith(".로펙 ")) {
+        var name = msg.content.replace(/^(\.ㄹㅍ|\.로펙)\s+/, "").trim();
+        if (!name) return;
 
-        new java.lang.Thread(function () {
+        // msg.reply(name + " 검색 중... 🔍"); // 필요하면 주석 해제
+
+        // 네트워크 작업은 별도 스레드에서 실행 (필수)
+        new Thread(() => {
             try {
-                // 1. 서버 데이터 조회
-                var jsonBody = org.jsoup.Jsoup.connect(SERVER_URL).data("name", name).ignoreContentType(true).timeout(15000).execute().body();
+                // 1. Lopec 서버 데이터 조회 (Jsoup 사용)
+                // GraalJS에서는 Jsoup.connect()로 바로 사용
+                var doc = Jsoup.connect(SERVER_URL)
+                    .data("name", name)
+                    .ignoreContentType(true)
+                    .timeout(15000)
+                    .execute();
+
+                var jsonBody = doc.body();
                 var res = JSON.parse(jsonBody);
 
                 if (res.ok) {
-                    var d = res.data;
+                    var d = res; // 서버 응답 구조에 따라 res.data 일수도 있고 res 일수도 있음 (기존 코드 참고)
+                    // 만약 서버가 { ok: true, name: "...", ... } 로 바로 준다면 d = res;
+                    // 만약 서버가 { ok: true, data: { ... } } 로 준다면 d = res.data;
 
-                    // 2. 로그인이 안 되어있으면 재시도
+                    // (기존 sybot 설명상: res 자체가 필드를 가짐)
+
+                    // 2. 로그인이 풀렸으면 재로그인
                     if (!loginCookies) tryLogin();
 
                     // 3. 클라이언트 초기화
                     client.init(JS_KEY, DOMAIN, loginCookies);
 
-                    // 4. [자동 전송] 
+                    // 4. 템플릿 전송
                     var sendRes = client.sendLink(msg.room, {
                         templateId: TEMPLATE_ID,
                         templateArgs: {
-                            // 기본 텍스트 정보
+                            // 템플릿 변수 매핑
                             "name": d.name,
-                            "tier_name": d.tier_name,
-                            "score": d.score,
-                            "level": d.item_level,
-
-                            // ★ 랭킹 정보 (위/%)
-                            "class_rank": d.class_rank,       // 예: 565위
-                            "class_percent": d.class_percent, // 예: 0.76% (새로 추가됨)
-
-                            "total_rank": d.total_rank,       // 예: 1,085위
-                            "total_percent": d.total_percent, // 예: 0.57% (새로 추가됨)
-
-                            // 이미지 정보
-                            "char_img": d.char_img || d.tier_img,
-                            "tier_img": d.tier_img,
-
-                            "class_img": d.class_img
+                            "tier_name": d.tierName, // 기존 JSON 키 확인 (tierName vs tier_name)
+                            "specPoint": d.specPoint,
+                            "remaining": d.remaining || "",
+                            "url": d.url || "https://lopec.kr"
+                            // 필요한 다른 인자들도 여기에 추가
                         }
                     }, 'custom').awaitResult();
 
-                    Log.i("전송 결과: " + JSON.stringify(sendRes));
+                    Log.i("전송 성공: " + JSON.stringify(sendRes));
 
                 } else {
-                    msg.reply("❌ 검색 실패: " + res.error);
+                    msg.reply("❌ 검색 실패: " + (res.error || "데이터 없음"));
                 }
+
             } catch (e) {
-                Log.e("에러: " + e);
-                msg.reply("오류 발생: " + e.message);
+                Log.e("로펙 실행 중 에러: " + e);
+                // 네트워크 에러나 로그인 에러 시 사용자에게 알림
+                msg.reply("앗차차! 처리 중 문제가 생겼어요. (로그 확인)");
             }
         }).start();
     }
