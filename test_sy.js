@@ -14,7 +14,7 @@ bot.removeAllListeners(Event.MESSAGE);
  */
 bot.addListener(Event.MESSAGE, (msg) => {
     // 업데이트 성공 여부를 확인하기 위한 간단한 명령어
-    if (msg.content === ".테스트5") {
+    if (msg.content === "!테스트3") {
         msg.reply("✅ 원격 업데이트 테스트 성공!\n현재 이 스크립트는 PC에서 전송된 최신 버전입니다.");
     }
 });

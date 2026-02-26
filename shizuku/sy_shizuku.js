@@ -1,69 +1,70 @@
 /**
- * @description Shizuku ADB 연동 및 특정 봇 원격 업데이트 (GraalJS 최적화)
- * @author 로미 (Original), Hehee (Fix/Update)
+ * @description Shizuku ADB 연동 및 특정 봇 원격 업데이트 (파일 변경 검증 강화)
+ * @author Hehee
  * @environment v0.7.41-alpha (GraalJS)
- * @license CC BY-NC-SA 4.0
  */
 
 const bot = BotManager.getCurrentBot();
 
-/**
- * [중요] 리스너 중복 방지
- * 업데이트 스크립트 자체의 중복 반응을 방지합니다.
- */
+// 리스너 중복 방지
 bot.removeAllListeners(Event.MESSAGE);
 
 /**
  * Shizuku rish를 이용한 ADB 명령어 실행 함수
- * @param {string} cmd 실행할 ADB 명령어
  */
-function adb(cmd) {
+function adbDetailed(cmd) {
     const context = App.getContext();
     const internalDir = context.getFilesDir().getAbsolutePath() + "/bin";
     const sdcardDir = "/sdcard/msgbot/shizuku";
+
+    const Runtime = java.lang.Runtime.getRuntime();
+    const BufferedReader = java.io.BufferedReader;
+    const InputStreamReader = java.io.InputStreamReader;
+    const File = java.io.File;
 
     try {
         const pm = context.getPackageManager();
         const shizukuInfo = pm.getApplicationInfo("moe.shizuku.privileged.api", 0);
         const shizukuLibPath = shizukuInfo.nativeLibraryDir;
-        const runtime = java.lang.Runtime.getRuntime();
 
-        // 환경 설정 명령어 배열 생성 및 자바 배열로 변환
-        const setupCmd = Java.to([
-            "sh", "-c",
-            `mkdir -p ${internalDir} && cp ${sdcardDir}/rish* ${internalDir}/ && chmod 755 ${internalDir}/rish`
-        ], "java.lang.String[]");
-        runtime.exec(setupCmd).waitFor();
+        const rishFile = new File(internalDir, "rish");
+        if (!rishFile.exists()) {
+            const setupCmd = Java.to([
+                "sh", "-c",
+                `mkdir -p ${internalDir} && cp ${sdcardDir}/rish* ${internalDir}/ && chmod 755 ${internalDir}/rish`
+            ], "java.lang.String[]");
+            Runtime.exec(setupCmd).waitFor();
+        }
 
-        // 실제 실행 명령어 배열 생성 및 자바 배열로 변환
         const execCmd = Java.to([
             "sh", "-c",
-            `export LD_LIBRARY_PATH=${shizukuLibPath} && sh ${internalDir}/rish -c '${cmd}'`
+            `export LD_LIBRARY_PATH=${shizukuLibPath} && sh ${internalDir}/rish -c "${cmd.replace(/"/g, '\\"')}"`
         ], "java.lang.String[]");
 
-        const process = runtime.exec(execCmd);
-        const out = [];
-        const reader = new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream()));
-        const errorReader = new java.io.BufferedReader(new java.io.InputStreamReader(process.getErrorStream()));
+        const process = Runtime.exec(execCmd);
+        const stdOut = [];
+        const stdErr = [];
+
+        const outReader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+        const errReader = new BufferedReader(new InputStreamReader(process.getErrorStream()));
 
         let line;
-        while ((line = reader.readLine()) !== null) {
-            line = String(line);
-            if (!line.includes("Android 14+") && !line.includes("permission")) out.push(line);
-        }
+        while ((line = outReader.readLine()) !== null) stdOut.push(String(line));
+        while ((line = errReader.readLine()) !== null) stdErr.push(String(line));
 
-        while ((line = errorReader.readLine()) !== null) {
-            line = String(line);
-            if (!line.includes("Android 14+") && !line.includes("permission") &&
-                !line.includes("chmod") && !line.includes("librish.so")) {
-                out.push(line);
-            }
-        }
+        const exitCode = process.waitFor();
 
-        process.waitFor();
-        return out.join("\n").trim();
+        return {
+            output: stdOut.join("\n").trim(),
+            error: stdErr.join("\n").trim(),
+            exitCode: exitCode
+        };
     } catch (e) {
-        return "ADB 실행 중 오류 발생: " + e.toString();
+        return {
+            output: "",
+            error: "Exception: " + e.toString(),
+            exitCode: -1
+        };
     }
 }
 
@@ -71,41 +72,55 @@ function adb(cmd) {
  * 메시지 수신 이벤트 핸들러
  */
 function onMessage(msg) {
-    // 1. ADB 명령어 처리 (디버깅용)
     if (msg.content.startsWith("!adb ")) {
         const command = msg.content.substring(5).trim();
-        const adbResult = adb(command);
-        msg.reply(adbResult || "실행 완료");
+        const res = adbDetailed(command);
+        msg.reply(`[Exit ${res.exitCode}]\nOut: ${res.output || "None"}\nErr: ${res.error || "None"}`);
     }
 
-    // 2. PC 원격 업데이트 및 자동 컴파일
     if (msg.content === "!업데이트") {
-        // === [설정 영역] ===
-        const PC_IP = "14.52.154.27";
+        const PC_IP = "121.135.162.225";
         const PORT = "5500";
-        const FILENAME = "test_sy.js"; // PC에서 가져올 파일명
-        const TARGET_BOT_NAME = "test_sy"; // 업데이트를 적용할 봇의 이름 (폴더명)
-        // ===================
+        const FILENAME = "test_sy.js";
+        const TARGET_BOT_NAME = "test_sy";
 
         const TARGET_PATH = `/sdcard/msgbot/Bots/${TARGET_BOT_NAME}/${TARGET_BOT_NAME}.js`;
+        const URL = `http://${PC_IP}:${PORT}/${FILENAME}`;
 
-        msg.reply(`🔄 [${TARGET_BOT_NAME}] 코드를 PC에서 가져오는 중...`);
+        msg.reply(`🔄 [${TARGET_BOT_NAME}] 업데이트 검증 모드...`);
 
-        const downloadCmd = `curl -L http://${PC_IP}:${PORT}/${FILENAME} -o ${TARGET_PATH}`;
-        const updateResult = adb(downloadCmd);
+        // 1. 업데이트 전 상태 기록 (파일 크기 및 수정 시간)
+        const beforeRes = adbDetailed(`stat -c "%s %Y" "${TARGET_PATH}"`);
+        const beforeInfo = beforeRes.exitCode === 0 ? beforeRes.output : "파일 없음";
 
-        // 결과 확인 및 컴파일
-        if (!updateResult.toLowerCase().includes("failed") && !updateResult.toLowerCase().includes("error")) {
-            msg.reply(`✅ [${TARGET_BOT_NAME}] 다운로드 성공! 즉시 재컴파일합니다.`);
+        // 2. 파일 다운로드 시도
+        // -f (fail silently) 옵션을 빼서 에러 메시지를 명확히 보고, -o로 덮어쓰기 강제
+        const downloadCmd = `curl -L -v --connect-timeout 5 "${URL}" -o "${TARGET_PATH}" 2>&1`;
+        const dlRes = adbDetailed(downloadCmd);
+
+        if (dlRes.exitCode !== 0) {
+            msg.reply(`❌ 다운로드 중 오류 발생\nCode: ${dlRes.exitCode}\n${dlRes.output}`);
+            return;
+        }
+
+        // 3. 업데이트 후 상태 확인 및 비교
+        const afterRes = adbDetailed(`stat -c "%s %Y" "${TARGET_PATH}"`);
+        const afterInfo = afterRes.output;
+
+        if (beforeInfo === afterInfo) {
+            msg.reply(`⚠️ [경고] 파일이 바뀌지 않았습니다!\n기존 정보: ${beforeInfo}\n현재 정보: ${afterInfo}\n\n사유 추정: PC 서버에서 같은 파일을 보내주고 있거나, 쓰기 권한 문제입니다.`);
+        } else {
+            // 4. 내용 확인 (파일 앞부분 100자 출력)
+            const previewRes = adbDetailed(`head -c 100 "${TARGET_PATH}"`);
+            msg.reply(`✅ 파일 변경 감지!\n[기존]: ${beforeInfo}\n[변경]: ${afterInfo}\n\n[내용 미리보기]:\n${previewRes.output}...`);
 
             try {
-                // 지정한 타겟 봇만 새로고침하여 적용합니다.
+                // 컴파일 전 캐시를 확실히 비우기 위해 강제 재컴파일
                 BotManager.compile(TARGET_BOT_NAME);
+                msg.reply(`🚀 [${TARGET_BOT_NAME}] 리로드 완료!`);
             } catch (e) {
-                msg.reply(`⚠️ [${TARGET_BOT_NAME}] 컴파일 실패: ` + e.message);
+                msg.reply(`⚠️ 컴파일 에러: ${e.message}`);
             }
-        } else {
-            msg.reply("❌ 업데이트 실패\n" + updateResult);
         }
     }
 }
