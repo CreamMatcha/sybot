@@ -1055,6 +1055,32 @@ const fetchSiblings = (characterName) => {
         return { ok: false, reason: "SYSTEM_ERROR", detail: e.message };
     }
 };
+
+/**
+ * 로스트아크 최신 패치노트 조회 함수
+ */
+function fetchLatestPatchNote() {
+    var url = LOSTARK_BASE + "/news/notices?searchText=" + encodeURIComponent("업데이트") + "&type=" + encodeURIComponent("공지");
+
+    // httpGetUtf8 활용
+    var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+
+    if (!res.ok) {
+        return { ok: false, reason: "HTTP_" + res.code };
+    }
+
+    try {
+        var list = JSON.parse(res.text);
+        if (Array.isArray(list) && list.length > 0) {
+            // 맨 첫 번째 항목(가장 최신) 반환
+            return { ok: true, data: list[0] };
+        }
+        return { ok: false, reason: "NO_DATA" };
+    } catch (e) {
+        return { ok: false, reason: "PARSE_ERROR" };
+    }
+}
+
 // ── 메시지 리스너: "ㅈㅌㄹ 캐릭명"
 bot.addListener(Event.MESSAGE, function (msg) {
     var room = msg.room || "";
@@ -1321,6 +1347,26 @@ bot.addListener(Event.MESSAGE, function (msg) {
             } catch (e) {
                 handleApiError(msg, e.message, "원대 조회", charAlt);
             }
+        }
+        return;
+    }
+
+    // 패치노트
+    var mPatch = content.match(/^(\.패치노트|\.?ㅍㅊㄴㅌ)$/);
+    if (mPatch) {
+        logCommand(msg, "패치노트 조회", "");
+
+        try {
+            var result = fetchLatestPatchNote();
+            if (result.ok) {
+                var patch = result.data;
+                var response = patch.Title + "\n\n" + patch.Link;
+                msg.reply(response);
+            } else {
+                handleApiError(msg, result.reason, "패치노트 조회");
+            }
+        } catch (e) {
+            handleApiError(msg, e, "패치노트 조회");
         }
         return;
     }
