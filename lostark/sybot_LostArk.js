@@ -719,7 +719,7 @@ const formatClassCompact = (className) => {
 
     // 2. 2글자인 경우 가운데 공백 추가 (바드 -> 바 드)
     if (shortName.length === 2) {
-        return shortName[0] + " " + shortName[1];
+        return shortName[0] + "  " + shortName[1];
     }
 
     // 3. 3글자 이상인 경우 그대로 혹은 잘라서 반환
@@ -1152,7 +1152,120 @@ function fetchGoldIslands() {
         return { ok: false, reason: "PARSE_ERROR" };
     }
 }
-// ── 메시지 리스너: "ㅈㅌㄹ 캐릭명"
+
+/**
+ * 레벨에 따른 주급(1골드 단위) 계산
+ */
+function calculateGoldForLevel(levelStr) {
+    // "1,750.00" 같은 문자열을 숫자로 변환
+    var level = parseFloat(String(levelStr).replace(/,/g, ""));
+    if (isNaN(level)) return 0;
+
+    // 만 단위(14.8 등)를 실제 골드 수치(148000 등)로 변경
+    if (level >= 1740) return 148000;
+    if (level >= 1730) return 138000;
+    if (level >= 1720) return 117000;
+    if (level >= 1710) return 108000;
+    if (level >= 1700) return 83000;
+    if (level >= 1690) return 62000;
+    if (level >= 1680) return 55500;
+    return 0;
+}
+
+/**
+ * 원정대 정보를 바탕으로 서버별 주급을 계산하는 함수
+ */
+function fetchWeeklyGold(charNameRaw) {
+    var charName = String(charNameRaw).trim();
+    var url = LOSTARK_BASE + "/characters/" + encodeURIComponent(charName) + "/siblings";
+
+    var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+    if (!res.ok) {
+        if (res.code === 404) return { ok: false, reason: "NOT_FOUND" };
+        return { ok: false, reason: "HTTP_" + res.code };
+    }
+
+    var data;
+    try {
+        data = JSON.parse(res.text);
+    } catch (e) {
+        return { ok: false, reason: "PARSE_ERROR" };
+    }
+
+    if (!Array.isArray(data) || data.length === 0) {
+        return { ok: false, reason: "NOT_FOUND" };
+    }
+
+    // 서버별로 캐릭터 분류
+    var servers = {};
+    var targetServer = data[0].ServerName;
+
+    for (var i = 0; i < data.length; i++) {
+        var c = data[i];
+        var srv = c.ServerName;
+        if (c.CharacterName === charName) targetServer = srv; // 검색한 캐릭터의 서버 저장
+
+        if (!servers[srv]) servers[srv] = [];
+        var lv = parseFloat(String(c.ItemAvgLevel).replace(/,/g, ""));
+
+        servers[srv].push({
+            name: c.CharacterName,
+            cls: c.CharacterClassName,
+            level: lv,
+            levelStr: c.ItemAvgLevel
+        });
+    }
+
+    // 검색한 캐릭터가 있는 서버가 가장 먼저 나오게 정렬
+    var serverNames = Object.keys(servers).sort(function (a, b) {
+        if (a === targetServer) return -1;
+        if (b === targetServer) return 1;
+        return 0;
+    });
+
+    // 타이틀 텍스트 변경
+    var out = "◦ " + charName + "의 주급\n";
+    var hasAnyGold = false;
+
+    // 각 서버별 주급 계산
+    for (var s = 0; s < serverNames.length; s++) {
+        var srvName = serverNames[s];
+        var chars = servers[srvName];
+
+        // 레벨 내림차순 정렬
+        chars.sort(function (a, b) { return b.level - a.level; });
+
+        var top6 = chars.slice(0, 6);
+        var serverGold = 0;
+        var details = [];
+
+        for (var k = 0; k < top6.length; k++) {
+            var c = top6[k];
+            var g = calculateGoldForLevel(c.level);
+            if (g > 0) {
+                serverGold += g;
+                var compactCls = formatClassCompact(c.cls);
+                // 개별 캐릭터의 추가 골드량 표시 제거
+                details.push("[" + compactCls + "] " + c.name + " (" + c.levelStr + ")");
+            }
+        }
+
+        if (serverGold > 0) {
+            hasAnyGold = true;
+            // 캐릭터 목록 먼저 출력 -> 한 줄 띄우기 -> 서버별 총합 출력
+            out += "\n" + details.join("\n") + "\n\n";
+            out += "[" + srvName + "] 총 " + formatThousandsSafe(serverGold) + " 골드\n";
+        }
+    }
+
+    if (!hasAnyGold) {
+        out += "\n주급을 받을 수 있는 캐릭터(1680 이상)가 없습니다.";
+    }
+
+    return { ok: true, content: out.trim() };
+}
+
+// 메시지 리스너
 bot.addListener(Event.MESSAGE, function (msg) {
     var room = msg.room || "";
     var content = (msg.content || "").trim();
@@ -1503,6 +1616,26 @@ bot.addListener(Event.MESSAGE, function (msg) {
         } catch (e) {
             Log.e("[쌀섬] 명령어 최종 처리 중 에러 발생: " + e + "\n" + e.stack);
             handleApiError(msg, e, "쌀섬 일정 조회");
+        }
+        return;
+    }
+
+    // 주급 조회
+    var mGold = content.match(/^(?:\.주급|\.?ㅈㄱ)\s+(\S+)$/);
+    if (mGold) {
+        var charGold = mGold[1];
+        logCommand(msg, "주급 조회", charGold);
+
+        try {
+            var rGold = fetchWeeklyGold(charGold);
+
+            if (rGold.ok) {
+                msg.reply(rGold.content);
+            } else {
+                handleApiError(msg, rGold.reason, "주급 조회", charGold);
+            }
+        } catch (e) {
+            handleApiError(msg, e, "주급 조회", charGold);
         }
         return;
     }
