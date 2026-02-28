@@ -1080,7 +1080,78 @@ function fetchLatestPatchNote() {
         return { ok: false, reason: "PARSE_ERROR" };
     }
 }
+/**
+ * 로스트아크 캘린더 API에서 골드를 주는 모험 섬(쌀섬) 일정을 가져오는 함수
+ */
+function fetchGoldIslands() {
+    Log.i("[쌀섬] fetchGoldIslands 함수 시작");
+    var url = LOSTARK_BASE + "/gamecontents/calendar";
 
+    var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+
+    if (!res.ok) {
+        Log.e("[쌀섬] HTTP 요청 실패: " + res.code);
+        return { ok: false, reason: "HTTP_" + res.code };
+    }
+
+    try {
+        var data = JSON.parse(res.text);
+        var goldIslandsByDate = {};
+
+        for (var i = 0; i < data.length; i++) {
+            var item = data[i];
+
+            // 1. 모험 섬만 필터링
+            if (item.CategoryName !== "모험 섬") continue;
+
+            var islandName = item.ContentsName;
+            var hasGold = false;
+            var goldStartTimes = null;
+
+            // 2. 보상 목록 중에서 "골드" 아이템 탐색
+            if (item.RewardItems) {
+                for (var r = 0; r < item.RewardItems.length; r++) {
+                    var rItems = item.RewardItems[r].Items;
+                    if (rItems) {
+                        for (var k = 0; k < rItems.length; k++) {
+                            if (rItems[k].Name === "골드") {
+                                hasGold = true;
+                                // ★ 핵심 수정: 골드 보상 전용 StartTimes를 추출
+                                goldStartTimes = rItems[k].StartTimes;
+                                break;
+                            }
+                        }
+                    }
+                    if (hasGold) break;
+                }
+            }
+
+            // 골드를 아예 주지 않는 섬은 패스
+            if (!hasGold) continue;
+
+            // ★ 핵심 수정: 골드 전용 StartTimes가 배열로 있으면 그것을 사용하고, 
+            // 만약 null이라면 (항상 골드를 주는 경우) 섬의 기본 StartTimes를 사용합니다.
+            var targetTimes = goldStartTimes ? goldStartTimes : item.StartTimes;
+
+            // 3. 추출한 일정(targetTimes)을 바탕으로 날짜별 맵핑
+            if (targetTimes) {
+                for (var s = 0; s < targetTimes.length; s++) {
+                    var dateStr = String(targetTimes[s]).split("T")[0];
+
+                    if (!goldIslandsByDate[dateStr]) {
+                        goldIslandsByDate[dateStr] = {};
+                    }
+                    goldIslandsByDate[dateStr][islandName] = true;
+                }
+            }
+        }
+
+        return { ok: true, data: goldIslandsByDate };
+    } catch (e) {
+        Log.e("[쌀섬] 데이터 파싱/처리 중 에러: " + e);
+        return { ok: false, reason: "PARSE_ERROR" };
+    }
+}
 // ── 메시지 리스너: "ㅈㅌㄹ 캐릭명"
 bot.addListener(Event.MESSAGE, function (msg) {
     var room = msg.room || "";
@@ -1352,7 +1423,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
     }
 
     // 패치노트
-    var mPatch = content.match(/^(\.패치노트|\.?ㅍㅊㄴㅌ)$/);
+    var mPatch = content.match(/^(\.패치노트|\.?ㅍㅊㄴㅌ|.ㅍㅊ)$/);
     if (mPatch) {
         logCommand(msg, "패치노트 조회", "");
 
@@ -1370,6 +1441,72 @@ bot.addListener(Event.MESSAGE, function (msg) {
         }
         return;
     }
+
+    // 쌀섬(골드 모험섬) 일정 조회
+    var mRice = content.match(/^(\.쌀|.모험섬)$/);
+    if (mRice) {
+        Log.i("[쌀섬] 명령어 인식 성공!");
+        logCommand(msg, "쌀섬 조회", "");
+
+        try {
+            var result = fetchGoldIslands();
+            if (!result.ok) {
+                Log.e("[쌀섬] 데이터 가져오기 실패, 이유: " + result.reason);
+                handleApiError(msg, result.reason, "쌀섬 일정 조회");
+                return;
+            }
+
+            var schedule = result.data;
+            var dates = Object.keys(schedule).sort();
+            Log.i("[쌀섬] 추출된 골드섬 날짜 목록: " + dates.join(", "));
+
+            var now = new Date();
+            var utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+            var kst = new Date(utc + (9 * 3600000));
+            var yyyy = kst.getFullYear();
+            var mm = String(kst.getMonth() + 1).padStart(2, '0');
+            var dd = String(kst.getDate()).padStart(2, '0');
+            var todayStr = yyyy + "-" + mm + "-" + dd;
+
+            Log.i("[쌀섬] 봇이 인식한 오늘 날짜(KST): " + todayStr);
+
+            var todayIslands = "없음";
+            if (schedule[todayStr]) {
+                todayIslands = Object.keys(schedule[todayStr]).join(", ");
+            }
+
+            var out = "오늘의 쌀섬 : " + todayIslands + "\n";
+            out += "━━━━━━━━━━━━━━\n";
+            out += "앞으로 일주일간의 쌀섬\n\n";
+
+            var printCount = 0;
+            for (var i = 0; i < dates.length; i++) {
+                var d = dates[i];
+                if (d >= todayStr) {
+                    var islands = Object.keys(schedule[d]).join(", ");
+                    var dateParts = d.split("-");
+                    var displayDate = parseInt(dateParts[1], 10) + "월 " + parseInt(dateParts[2], 10) + "일";
+
+                    out += displayDate + " : " + islands + "\n";
+                    printCount++;
+                }
+                if (printCount >= 7) break;
+            }
+
+            if (printCount === 0) {
+                out += "예정된 쌀섬 일정이 없습니다.";
+            }
+
+            Log.i("[쌀섬] 결과 텍스트 조합 완료, 메시지 전송 시도");
+            msg.reply(out.trim());
+
+        } catch (e) {
+            Log.e("[쌀섬] 명령어 최종 처리 중 에러 발생: " + e + "\n" + e.stack);
+            handleApiError(msg, e, "쌀섬 일정 조회");
+        }
+        return;
+    }
+
 });
 
 

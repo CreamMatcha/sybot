@@ -17,10 +17,10 @@ const bot = BotManager.getCurrentBot();
 const File = Java.type("java.io.File");
 
 /** @description 허용된 채팅방 목록 */
-const ALLOWED_ROOMS = ["테스트1"];
+const ALLOWED_ROOMS = ["아크라시아인의 휴식처"];
 
 /** @description 관리자 해시 목록 (본인의 해시를 여기에 추가하세요) */
-const ADMIN_HASHES = ["3e0a21ab0fa630484efbe065701156ba6c3dce36f981d1151e6e99887a729ee9"];
+const ADMIN_HASHES = ["af25e2be2a646336ef12d1946faa6c266f170b75d3014f470b030b13a1c02096"];
 
 /** @description 명령어 접두사 */
 const PREFIX = ".";
@@ -97,7 +97,7 @@ function onMessage(msg) {
     if (!msg.content.startsWith(PREFIX)) return;
 
     // 베타 테스트 안내 문구가 포함된 커스텀 응답 함수
-    const reply = (text) => msg.reply(`[🛠️ 베타 테스트 중]\n${text}`);
+    const reply = (text) => msg.reply(`[beta]\n${text}`);
 
     const args = msg.content.substring(PREFIX.length).trim().split(/\s+/);
     const cmd = args[0];
@@ -116,6 +116,7 @@ function onMessage(msg) {
             points: 1000,
             lastDaily: 0,
             lastDice: 0,
+            diceCountToday: 0,
             lastAllIn: 0,
             playCount: 0,
             allInCritFails: 0
@@ -124,6 +125,7 @@ function onMessage(msg) {
         db[hash].name = name;
         // 기존 유저가 신규 필드가 없는 경우 보정
         if (db[hash].lastDice === undefined) db[hash].lastDice = 0;
+        if (db[hash].diceCountToday === undefined) db[hash].diceCountToday = 0;
         if (db[hash].lastAllIn === undefined) db[hash].lastAllIn = 0;
         if (db[hash].allInCritFails === undefined) db[hash].allInCritFails = 0;
     }
@@ -140,13 +142,17 @@ function onMessage(msg) {
                     return;
                 }
 
-                const targetName = args[1];
-                const amount = parseInt(args[2]);
+                // 정규식을 사용해 공백이 포함된 "닉네임"과 금액을 정확히 추출
+                const contentStr = msg.content.substring(PREFIX.length).trim();
+                const match = contentStr.match(/^지급\s+"([^"]+)"\s+(-?\d+)$/);
 
-                if (!targetName || isNaN(amount)) {
-                    reply(`[⚠️ 사용법] .지급 <닉네임> <금액>`);
+                if (!match) {
+                    reply(`[⚠️ 사용법] .지급 "닉네임" <금액>\n예시: .지급 "홍 길동" 1000`);
                     return;
                 }
+
+                const targetName = match[1];
+                const amount = parseInt(match[2], 10);
 
                 // 이름으로 유저 찾기
                 const targetHash = Object.keys(db).find(k => db[k].name === targetName);
@@ -178,9 +184,14 @@ function onMessage(msg) {
             }
 
             case "주사위": {
-                // 자정 기준 제한 체크
-                if (isToday(user.lastDice)) {
-                    reply(`[⏳ 주사위 쿨타임]\n주사위는 하루에 한 번만 가능합니다.\n자정 초기화까지: ${getTimeUntilMidnight()}`);
+                // 날짜가 바뀌었으면 주사위 횟수 초기화
+                if (!isToday(user.lastDice)) {
+                    user.diceCountToday = 0;
+                }
+
+                // 자정 기준 제한 체크 (하루 3번)
+                if (user.diceCountToday >= 3) {
+                    reply(`[⏳ 주사위 쿨타임]\n주사위는 하루에 3번만 가능합니다.\n자정 초기화까지: ${getTimeUntilMidnight()}`);
                     return;
                 }
 
@@ -196,6 +207,7 @@ function onMessage(msg) {
 
                 user.points -= bet;
                 user.playCount++;
+                user.diceCountToday++;
                 user.lastDice = now; // 시간 기록
 
                 const d = [rollD6(), rollD6(), rollD6()];
