@@ -1157,11 +1157,9 @@ function fetchGoldIslands() {
  * 레벨에 따른 주급(1골드 단위) 계산
  */
 function calculateGoldForLevel(levelStr) {
-    // "1,750.00" 같은 문자열을 숫자로 변환
     var level = parseFloat(String(levelStr).replace(/,/g, ""));
     if (isNaN(level)) return 0;
 
-    // 만 단위(14.8 등)를 실제 골드 수치(148000 등)로 변경
     if (level >= 1740) return 148000;
     if (level >= 1730) return 138000;
     if (level >= 1720) return 117000;
@@ -1263,6 +1261,154 @@ function fetchWeeklyGold(charNameRaw) {
     }
 
     return { ok: true, content: out.trim() };
+}
+
+// 악세서리 옵션 축약 매핑
+var ACC_STAT_SHORT = {
+    "적에게 주는 피해": "적주피",
+    "무기 공격력": "무공",
+    "파티원 보호막 효과": "파보호",
+    "파티원 회복 효과": "파회복",
+    "치명타 피해": "치피",
+    "아군 피해량 강화 효과": "아피강",
+    "치명타 적중률": "치적",
+    "아군 공격력 강화 효과": "아공강",
+    "공격력": "공격력",
+    "최대 마나": "최대마나",
+    "전투 중 마나 회복량": "마나회복",
+    "낙인력": "낙인력",
+    "최대 생명력": "최생",
+    "세레나데, 신앙, 조화 게이지 획득량": "아덴",
+    "전투 중 생명력 회복량": "생회"
+};
+
+function formatAccStatName(name) {
+    var n = name.trim();
+    return ACC_STAT_SHORT[n] || n;
+}
+
+// 폰트 컬러를 기준으로 연마 효과 등급 판별
+function getAccGradeFromColor(colorCode) {
+    var c = colorCode.toUpperCase();
+    if (c.indexOf("00B5FF") !== -1) return "하"; // 파란색 (희귀)
+    if (c.indexOf("CE43FC") !== -1) return "중"; // 보라색 (영웅)
+    if (c.indexOf("FE9600") !== -1 || c.indexOf("FA5D00") !== -1 || c.indexOf("FF9900") !== -1) return "상"; // 주황색 (전설)
+    return "하"; // 기본값
+}
+
+function fetchAccessories(charNameRaw) {
+    var charName = String(charNameRaw);
+    var url = LOSTARK_BASE + "/armories/characters/" + charName + "/equipment";
+
+    var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+    if (!res.ok) {
+        if (res.code === 404) return { ok: false, reason: "NOT_FOUND" };
+        return { ok: false, reason: "HTTP_" + res.code };
+    }
+
+    var arr;
+    try {
+        arr = JSON.parse(res.text);
+    } catch (e) {
+        return { ok: false, reason: "PARSE_ERROR" };
+    }
+
+    if (!arr || arr.length === 0) return { ok: false, reason: "NO_EQUIP" };
+
+    var accessories = [];
+    var sumQuality = 0;
+    var accCount = 0;
+
+    for (var i = 0; i < arr.length; i++) {
+        var it = arr[i];
+        if (it && (it.Type === "목걸이" || it.Type === "귀걸이" || it.Type === "반지")) {
+            try {
+                var tooltip = JSON.parse(it.Tooltip);
+                var quality = 0;
+                var gradeText = it.Grade + " " + it.Type;
+
+                // 품질과 등급(고대 목걸이 등) 추출
+                if (tooltip.Element_001 && tooltip.Element_001.value) {
+                    quality = tooltip.Element_001.value.qualityValue || 0;
+                    if (tooltip.Element_001.value.leftStr0) {
+                        gradeText = stripHtml(tooltip.Element_001.value.leftStr0);
+                    }
+                }
+
+                sumQuality += quality;
+                accCount++;
+
+                // 연마 효과 추출
+                var polishLines = [];
+                for (var key in tooltip) {
+                    var element = tooltip[key];
+                    if (element && element.type === "ItemPartBox" &&
+                        element.value && element.value.Element_000 &&
+                        element.value.Element_000.indexOf("연마 효과") !== -1) {
+
+                        var rawLines = element.value.Element_001.split(/<br\s*\/?>/i);
+                        for (var j = 0; j < rawLines.length; j++) {
+                            var rawLine = rawLines[j];
+                            // 불필요한 이미지 태그 제거
+                            var lineNoImg = rawLine.replace(/<img[^>]*>|<\/img>/ig, "").trim();
+                            if (!lineNoImg) continue;
+
+                            // 색상 태그를 이용한 파싱 로직
+                            // 예: 무기 공격력 <FONT COLOR='CE43FC'>+1.80%</FONT>
+                            var match = lineNoImg.match(/(.*?)\s*<font\s+color=['"]?([^'"]+)['"]?>([^<]+)<\/font>/i);
+                            if (match) {
+                                var statName = formatAccStatName(match[1]);
+                                var color = match[2];
+                                var val = match[3];
+                                var rank = getAccGradeFromColor(color);
+                                polishLines.push("[" + rank + "] " + statName + " " + val);
+                            } else {
+                                // 파싱 실패 시 기본 텍스트 삽입
+                                polishLines.push(stripHtml(lineNoImg));
+                            }
+                        }
+                        break;
+                    }
+                }
+
+                accessories.push({
+                    type: it.Type,
+                    gradeText: gradeText,
+                    quality: quality,
+                    lines: polishLines
+                });
+
+            } catch (e) {
+                Log.e("[LOA] Accessory parse error for " + it.Name + ": " + e);
+            }
+        }
+    }
+
+    if (accessories.length === 0) return { ok: false, reason: "NO_ACCESSORY" };
+
+
+    // 악세서리 정렬: 목걸이 -> 귀걸이 -> 반지 순서
+    var typeOrder = { "목걸이": 1, "귀걸이": 2, "반지": 3 };
+    accessories.sort(function (a, b) {
+        return typeOrder[a.type] - typeOrder[b.type];
+    });
+
+    // 텍스트 조합
+    var out = [];
+    out.push(charName + "의 악세 정보\n");
+
+    for (var k = 0; k < accessories.length; k++) {
+        var acc = accessories[k];
+        out.push("• " + acc.gradeText + " (품: " + acc.quality + ")");
+        if (acc.lines.length > 0) {
+            out.push(acc.lines.join("\n"));
+        } else {
+            out.push("연마 효과 없음");
+        }
+        out.push(""); // 한 줄 띄어쓰기
+    }
+
+    return { ok: true, name: charName, content: out.join("\n").trim() };
 }
 
 // 메시지 리스너
@@ -1636,6 +1782,34 @@ bot.addListener(Event.MESSAGE, function (msg) {
             }
         } catch (e) {
             handleApiError(msg, e, "주급 조회", charGold);
+        }
+        return;
+    }
+
+    // 악세서리 조회
+    var mAcc = content.match(/^(?:\.?ㅇㅅ|\.악세)\s+(\S+)$/);
+    if (mAcc) {
+        var charAcc = mAcc[1];
+        logCommand(msg, "악세 조회", charAcc);
+
+        try {
+            var rAcc = fetchAccessories(charAcc);
+
+            if (rAcc && rAcc.ok) {
+                // 성공
+                msg.reply(rAcc.content);
+            } else {
+                // 실패
+                var reason = (rAcc && rAcc.reason) ? rAcc.reason : "UNKNOWN";
+                if (reason === "NO_ACCESSORY") {
+                    msg.reply("해당 캐릭터는 악세서리를 착용하고 있지 않거나 정보를 불러올 수 없습니다.");
+                } else {
+                    handleApiError(msg, reason, "악세 조회", charAcc);
+                }
+            }
+        } catch (e) {
+            // 시스템 에러
+            handleApiError(msg, e, "악세 조회", charAcc);
         }
         return;
     }
