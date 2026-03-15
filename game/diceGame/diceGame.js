@@ -1,11 +1,11 @@
 /**
- * @description 서윤봇 (Sybot) 주사위 게임 및 포인트 경제 시스템
+ * @description 서윤봇 (Sybot) 주사위 게임 및 포인트 경제 시스템 (수정본 v3)
  * @environment MessengerBotR v0.7.41-alpha (GraalJS)
  * * [명령어 목록]
- * .출석 - 일일 지원금 2,000P 수령 (24시간 제한)
+ * .출석 - 일일 지원금 2,000P + 랜덤 보너스 수령 (24시간 제한)
  * .지갑 / .포인트 - 내 정보 및 잔액 확인
- * .주사위 <금액> - 조합형 게임 (24시간 제한)
- * .올인 - D100 기반 크리티컬 도박 (24시간 제한)
+ * .주사위 <금액> - 조합형 게임 (일일 5회, 전액 배팅 가능, 꽝이어도 20% 페이백 보장)
+ * .올인 - D100 기반 크리티컬 도박 (100% 자동 베팅, 파산 시 구제 이벤트)
  * .랭킹 - 전체 사용자 포인트 순위 확인
  * * [관리자 명령어]
  * .지급 <닉네임> <금액> - 특정 유저에게 포인트 지급
@@ -54,7 +54,6 @@ function saveUserData(data) {
         Log.e(`데이터 저장 실패: ${e.message}`);
     }
 }
-
 
 /* ==================== 유틸리티 함수 ==================== */
 
@@ -109,7 +108,7 @@ function onMessage(msg) {
     const hash = msg.author.hash;
     const name = msg.author.name;
 
-    // 유저 데이터 초기화 및 확장 (신규 필드 포함)
+    // 유저 데이터 초기화 및 확장
     if (!db[hash]) {
         db[hash] = {
             name: name,
@@ -123,7 +122,6 @@ function onMessage(msg) {
         };
     } else {
         db[hash].name = name;
-        // 기존 유저가 신규 필드가 없는 경우 보정
         if (db[hash].lastDice === undefined) db[hash].lastDice = 0;
         if (db[hash].diceCountToday === undefined) db[hash].diceCountToday = 0;
         if (db[hash].lastAllIn === undefined) db[hash].lastAllIn = 0;
@@ -136,13 +134,11 @@ function onMessage(msg) {
     try {
         switch (cmd) {
             case "지급": {
-                // 관리자 체크
                 if (!ADMIN_HASHES.includes(hash)) {
                     reply(`[🚫 권한 없음] 관리자만 사용 가능한 명령어입니다.`);
                     return;
                 }
 
-                // 정규식을 사용해 공백이 포함된 "닉네임"과 금액을 정확히 추출
                 const contentStr = msg.content.substring(PREFIX.length).trim();
                 const match = contentStr.match(/^지급\s+"([^"]+)"\s+(-?\d+)$/);
 
@@ -154,7 +150,6 @@ function onMessage(msg) {
                 const targetName = match[1];
                 const amount = parseInt(match[2], 10);
 
-                // 이름으로 유저 찾기
                 const targetHash = Object.keys(db).find(k => db[k].name === targetName);
                 if (!targetHash) {
                     reply(`[❌ 오류] '${targetName}' 유저를 찾을 수 없습니다.`);
@@ -168,9 +163,13 @@ function onMessage(msg) {
 
             case "출석": {
                 if (!isToday(user.lastDaily)) {
-                    user.points += 2000;
+                    const baseDaily = 2000;
+                    const randomBonus = Math.floor(Math.random() * 901) + 100; // 100 ~ 1000 랜덤 보너스
+                    const totalReward = baseDaily + randomBonus;
+
+                    user.points += totalReward;
                     user.lastDaily = now;
-                    reply(`[💰 출석 완료]\n${name}님, 지원금 2,000P 지급!\n잔액: ${user.points.toLocaleString()}P`);
+                    reply(`[💰 출석 완료]\n${name}님, 기본 지원금 2,000P + 🎁 보너스 ${randomBonus.toLocaleString()}P 지급!\n잔액: ${user.points.toLocaleString()}P`);
                 } else {
                     reply(`[⏳ 출석 대기]\n오늘은 이미 출석하셨습니다.\n자정 초기화까지 ${getTimeUntilMidnight()} 남았습니다.`);
                 }
@@ -184,14 +183,13 @@ function onMessage(msg) {
             }
 
             case "주사위": {
-                // 날짜가 바뀌었으면 주사위 횟수 초기화
                 if (!isToday(user.lastDice)) {
                     user.diceCountToday = 0;
                 }
 
-                // 자정 기준 제한 체크 (하루 3번)
-                if (user.diceCountToday >= 3) {
-                    reply(`[⏳ 주사위 쿨타임]\n주사위는 하루에 3번만 가능합니다.\n자정 초기화까지: ${getTimeUntilMidnight()}`);
+                // 하루 제한 5번
+                if (user.diceCountToday >= 5) {
+                    reply(`[⏳ 주사위 쿨타임]\n주사위는 하루에 5번만 가능합니다.\n자정 초기화까지: ${getTimeUntilMidnight()}`);
                     return;
                 }
 
@@ -200,15 +198,19 @@ function onMessage(msg) {
                     reply(`[⚠️ 사용법] .주사위 <금액>`);
                     return;
                 }
+
                 if (user.points < bet) {
                     reply(`[💸 잔액 부족] 보유: ${user.points.toLocaleString()}P`);
                     return;
                 }
 
+                // 배팅 제한 삭제 (100% 배팅 가능)
+                // 대신 아래 배팅 결과에서 20%를 환급받도록 처리
+
                 user.points -= bet;
                 user.playCount++;
                 user.diceCountToday++;
-                user.lastDice = now; // 시간 기록
+                user.lastDice = now;
 
                 const d = [rollD6(), rollD6(), rollD6()];
                 const sum = d[0] + d[1] + d[2];
@@ -221,17 +223,19 @@ function onMessage(msg) {
                 else if (sorted[0] + 1 === sorted[1] && sorted[1] + 1 === sorted[2]) { mult = 3; desc = "✨ [스트레이트!]"; }
                 else if (d[0] === d[1] || d[1] === d[2] || d[0] === d[2]) { mult = 1.5; desc = "🎲 [더블!]"; }
                 else if (sum >= 14) { mult = 1; desc = "👍 [하이 롤!]"; }
-                else { mult = 0; desc = "💥 [꽝]"; }
+                else { mult = 0.2; desc = "💥 [꽝] (20% 보증 환급)"; } // 꽝이어도 20% 페이백 적용
 
                 const win = Math.floor(bet * mult);
                 user.points += win;
 
-                reply(`[🎲 결과: ${d.join(", ")}]\n${desc}\n${mult > 0 ? `+${win.toLocaleString()}P` : `-${bet.toLocaleString()}P`}\n잔액: ${user.points.toLocaleString()}P`);
+                // 출력 메시지 (성공 시 획득량 표기, 실패(0.2배) 시 잃은 량 표기)
+                const resultText = mult >= 1 ? `+${win.toLocaleString()}P` : `-${(bet - win).toLocaleString()}P`;
+
+                reply(`[🎲 결과: ${d.join(", ")}]\n${desc}\n${resultText}\n잔액: ${user.points.toLocaleString()}P`);
                 break;
             }
 
             case "올인": {
-                // 자정 기준 제한 체크
                 if (isToday(user.lastAllIn)) {
                     reply(`[⏳ 올인 쿨타임]\n올인은 하루에 한 번만 가능합니다.\n자정 초기화까지: ${getTimeUntilMidnight()}`);
                     return;
@@ -242,16 +246,12 @@ function onMessage(msg) {
                     return;
                 }
 
-                // 보유 포인트의 70% 자동 배팅
-                const amount = Math.floor(user.points * 0.7);
-                if (amount <= 0) {
-                    reply(`[💸 배팅 불가] 포인트가 너무 적어 70% 배팅을 진행할 수 없습니다.`);
-                    return;
-                }
+                // 보유 포인트의 100% 자동 배팅
+                const amount = user.points;
 
                 user.points -= amount;
                 user.playCount++;
-                user.lastAllIn = now; // 시간 기록
+                user.lastAllIn = now;
 
                 const luck = rollD100();
                 let final = 0;
@@ -265,7 +265,7 @@ function onMessage(msg) {
                     user.allInCritFails++;
                     if (user.allInCritFails >= 3) {
                         final = amount * 20;
-                        user.allInCritFails = 0; // 누적 횟수 초기화
+                        user.allInCritFails = 0;
                         status = `👼 [기사회생] 3번째 크리티컬 실패! 불운의 끝에서 배팅액의 20배를 돌려받습니다!!`;
                     } else {
                         final = 0;
@@ -278,11 +278,26 @@ function onMessage(msg) {
                 }
                 else {
                     final = 0;
-                    status = "📉 [실패] 배팅액을 잃었습니다...";
+                    status = "📉 [실패] 배팅액을 전부 잃었습니다...";
+                }
+
+                // 올인으로 잔액이 0이 되었을 경우 구제금 시스템 발동
+                if (final === 0) {
+                    const isJackpot = Math.random() < 0.05; // 5% 확률 대박
+                    let reliefPoints = 0;
+
+                    if (isJackpot) {
+                        reliefPoints = Math.floor(Math.random() * 40001) + 10000; // 10,000 ~ 50,000
+                        status += `\n\n🍀 [기적의 동아줄!] 지나가던 거부가 파산한 당신을 가엾게 여겨 ${reliefPoints.toLocaleString()}P를 적선했습니다!!`;
+                    } else {
+                        reliefPoints = Math.floor(Math.random() * 901) + 100; // 100 ~ 1,000
+                        status += `\n\n🪙 [파산 구제금] 길바닥을 뒤져 ${reliefPoints.toLocaleString()}P를 찾아냈습니다...`;
+                    }
+                    final += reliefPoints;
                 }
 
                 user.points += final;
-                reply(`[⚠️ ALL-IN 결과: ${luck}]\n배팅 금액: ${amount.toLocaleString()}P (보유 70%)\n${status}\n잔액: ${user.points.toLocaleString()}P`);
+                reply(`[⚠️ ALL-IN 결과: ${luck}]\n배팅 금액: ${amount.toLocaleString()}P (100% 배팅)\n${status}\n잔액: ${user.points.toLocaleString()}P`);
                 break;
             }
 
@@ -291,8 +306,8 @@ function onMessage(msg) {
                     .map(h => ({ name: db[h].name, pts: db[h].points, hash: h }))
                     .sort((a, b) => b.pts - a.pts);
 
-                let view = "🏆 다이스 게임 랭킹 (Top 10)\n\n";
-                ranking.slice(0, 10).forEach((u, i) => {
+                let view = "🏆 다이스 게임 랭킹\n\n";
+                ranking.forEach((u, i) => {
                     const icon = i === 0 ? "🥇" : i === 1 ? "🥈" : i === 2 ? "🥉" : `[${i + 1}]`;
                     view += `${icon} ${u.name}: ${u.pts.toLocaleString()}P\n`;
                 });
