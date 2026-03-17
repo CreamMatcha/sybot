@@ -84,7 +84,7 @@ app.get('/search', async (req, res) => {
     const page = await browser.newPage();
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-    const url = `https://legacy.lopec.kr/search/search.html?headerCharacterName=${encodeURIComponent(name)}`;
+    const url = `https://lopec.kr/character/specPoint/${encodeURIComponent(name)}`;
 
     // 페이지 접속
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
