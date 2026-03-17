@@ -945,55 +945,39 @@ function mapToText(mapObj) {
     return keys.map(function (k) { return k + " x " + mapObj[k]; }).join(" + ");
 }
 
-function renderRaidBlock(raidName, diffName, gateList) {
-    var lines = [];
-    lines.push("◦ " + raidName + " " + diffName);
-
-    var sumGold = 0;
-    var sumMoreGold = 0;
-    var sumClear = {};
-    var sumMore = {};
-
-    for (var i = 0; i < gateList.length; i++) {
-        var g = gateList[i] || {};
-        var gate = Math.round(Number(g.gate) || (i + 1));
-        var gold = Math.round(Number(g.gold) || 0);
-        var moreGold = Math.round(Number(g.moreGold) || 0);
-
-        sumGold += gold;
-        sumMoreGold += moreGold;
-
-        mergeItems(sumClear, g.clear);
-        mergeItems(sumMore, g.more);
-
-        var clearText = itemsToText(g.clear);
-        var line = gate + "관: " + formatGold(gold) + "G";
-        if (moreGold > 0) line += "(-" + formatGold(moreGold) + "G)";
-        if (clearText) line += " + " + clearText;
-
-        lines.push(line);
+function findRaidCandidates(db, query) {
+    if (!db || !db.raids) return [];
+    var raidNames = Object.keys(db.raids);
+    var matched = [];
+    for (var i = 0; i < raidNames.length; i++) {
+        if (raidNames[i].indexOf(query) !== -1) matched.push(raidNames[i]);
     }
-    var totalLine = "총합: " + formatGold(sumGold) + "G";
-    if (sumMoreGold > 0) totalLine += "(-" + formatGold(sumMoreGold) + "G)";
-
-    var clearTotalText = mapToText(sumClear);
-    if (clearTotalText) totalLine += " + " + clearTotalText;
-
-    var moreTotalText = mapToText(sumMore);
-    if (moreTotalText) totalLine += " (+" + moreTotalText + ")";
-
-    lines.push(totalLine);
-    return lines.join("\n");
+    return matched;
 }
 
-function findRaidCandidates(db, raidQuery) {
-    var raids = (db && db.raids) ? db.raids : {};
-    var q = _normKey(raidQuery);
-    var names = Object.keys(raids);
-    if (!q) return names; // 빈 검색이면 전체
-    return names.filter(function (name) { return _normKey(name).indexOf(q) !== -1; });
+function renderRaidBlock(raidName, diff, gates) {
+    var res = "◦ " + raidName + " (" + diff + ")\n";
+    var totalGold = 0;
+    for (var i = 0; i < gates.length; i++) {
+        var g = gates[i];
+        res += (i + 1) + "관: " + g.gold + "G (더보기 -" + g.moreGold + "G)\n";
+        totalGold += g.gold;
+    }
+    res += "총합: " + totalGold + "G";
+    return res;
 }
 
+function loadRaidRewards() {
+    try {
+        // 사양서에 정의된 FileStream API 사용 (상단에 RAID_REWARD_FILE 경로 정의 필요)
+        var path = "/sdcard/Sybot/data/raid_rewards.json";
+        if (typeof RAID_REWARD_FILE !== 'undefined') path = RAID_REWARD_FILE;
+
+        return FileStream.readJson(path);
+    } catch (e) {
+        return null;
+    }
+}
 
 /**
  * 캐릭터의 원정대(부캐) 목록을 가져와서 정렬하는 함수
@@ -1426,8 +1410,8 @@ bot.addListener(Event.MESSAGE, function (msg) {
     //   .ㅋㄱ 종막 노말       -> 종막 노말만 출력
     var mRR = content.match(/^(?:\.?ㅋㄱ|\.클골)(?:\s+(.+))?$/);
     if (mRR) {
-        var arg = (mRR[1] || "").trim(); // 인잣값을 먼저 변수에 할당
-        logCommand(msg, "레이드 보상 조회", arg); // charName 대신 arg를 사용하도록 수정
+        var arg = (mRR[1] || "").trim();
+        logCommand(msg, "레이드 보상 조회", arg);
 
         var db = loadRaidRewards();
         if (!db) {
@@ -1435,26 +1419,18 @@ bot.addListener(Event.MESSAGE, function (msg) {
             return;
         }
 
-        if (!arg) {
-            var raidNames = Object.keys(db.raids || {}).sort();
-            msg.reply(
-                "사용법:\n" +
-                ".ㅋㄱ 레이드명 [난이도]\n\n" +
-                "예) .ㅋㄱ 종막\n" +
-                "예) .ㅋㄱ 종막 노말\n\n" +
-                "레이드 목록: " + raidNames.join(", ")
-            );
-            return;
-        }
-
-        // 난이도 감지
+        // 난이도 및 단계 감지 로직
         var diff = null;
         if (arg.indexOf("노말") !== -1) diff = "노말";
         else if (arg.indexOf("하드") !== -1) diff = "하드";
         else if (arg.indexOf("나이트메어") !== -1) diff = "나이트메어";
+        else if (arg.indexOf("1단계") !== -1) diff = "1단계";
+        else if (arg.indexOf("2단계") !== -1) diff = "2단계";
+        else if (arg.indexOf("3단계") !== -1) diff = "3단계";
 
         var raidQuery = arg;
         if (diff) raidQuery = arg.replace(diff, "").trim();
+        // ------------------------------------------
 
         var cands = findRaidCandidates(db, raidQuery);
         if (!cands.length) {
@@ -1471,21 +1447,17 @@ bot.addListener(Event.MESSAGE, function (msg) {
         var diffs = Object.keys(raidObj);
 
         if (!diff) {
-            // 난이도 미지정: 해당 레이드의 모든 난이도 출력
             diffs.sort();
             var blocks = [];
             for (var i = 0; i < diffs.length; i++) {
                 var d = diffs[i];
                 blocks.push(renderRaidBlock(raidName, d, raidObj[d] || []));
-                if (i < diffs.length - 1) {
-                    blocks.push("━━━━━━━━━━━━━━");
-                }
+                if (i < diffs.length - 1) blocks.push("━━━━━━━━━━━━━━");
             }
             msg.reply(blocks.join("\n"));
             return;
         }
 
-        // 난이도 지정: 그 난이도만 출력
         if (!raidObj[diff]) {
             msg.reply(raidName + "에 '" + diff + "' 난이도 데이터가 없어요.\n가능: " + diffs.sort().join(", "));
             return;

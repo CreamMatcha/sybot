@@ -1,6 +1,116 @@
 {
   "version": 1,
   "raids": {
+    "지평의 성당": {
+      "1단계": [
+        {
+          "gate": 1,
+          "gold": 13500,
+          "moreGold": 0,
+          "clear": [
+            {
+              "name": "파편",
+              "qty": 4
+            }
+          ],
+          "more": [
+            {
+              "name": "파편",
+              "qty": 4
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 16500,
+          "moreGold": 0,
+          "clear": [
+            {
+              "name": "파편",
+              "qty": 6
+            }
+          ],
+          "more": [
+            {
+              "name": "파편",
+              "qty": 6
+            }
+          ]
+        }
+      ],
+      "2단계": [
+        {
+          "gate": 1,
+          "gold": 16000,
+          "moreGold": 0,
+          "clear": [
+            {
+              "name": "파편",
+              "qty": 12
+            }
+          ],
+          "more": [
+            {
+              "name": "파편",
+              "qty": 12
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 24000,
+          "moreGold": 0,
+          "clear": [
+            {
+              "name": "파편",
+              "qty": 18
+            }
+          ],
+          "more": [
+            {
+              "name": "파편",
+              "qty": 18
+            }
+          ]
+        }
+      ],
+      "3단계": [
+        {
+          "gate": 1,
+          "gold": 20000,
+          "moreGold": 0,
+          "clear": [
+            {
+              "name": "파편",
+              "qty": 24
+            }
+          ],
+          "more": [
+            {
+              "name": "파편",
+              "qty": 24
+            }
+          ]
+        },
+        {
+          "gate": 2,
+          "gold": 30000,
+          "moreGold": 0,
+          "clear": [
+            {
+              "name": "파편",
+              "qty": 36
+            }
+          ],
+          "more": [
+            {
+              "name": "파편",
+              "qty": 36
+            }
+          ]
+        }
+      ]
+    },
     "세르카": {
       "하드": [
         {
