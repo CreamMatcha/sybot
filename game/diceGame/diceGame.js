@@ -1,5 +1,5 @@
 /**
- * @description 서윤봇 (Sybot) 주사위 게임 및 포인트 경제 시스템 (수정본 v3)
+ * @description 서윤봇 (Sybot) 주사위 게임 및 포인트 경제 시스템 (수정본 v3 + 관리자 기능 강화)
  * @environment MessengerBotR v0.7.41-alpha (GraalJS)
  * * [명령어 목록]
  * .출석 - 일일 지원금 2,000P + 랜덤 보너스 수령 (24시간 제한)
@@ -8,7 +8,10 @@
  * .올인 - D100 기반 크리티컬 도박 (100% 자동 베팅, 파산 시 구제 이벤트)
  * .랭킹 - 전체 사용자 포인트 순위 확인
  * * [관리자 명령어]
- * .지급 <닉네임> <금액> - 특정 유저에게 포인트 지급
+ * .지급 <닉네임/순위> <금액> - 특정 유저에게 포인트 지급
+ * .주사위추가 <닉네임/순위> <횟수> - 주사위 기회 추가 부여
+ * .주사위초기화 <닉네임/순위> - 주사위 기회 초기화 (오늘 안 한 상태로 만듦)
+ * .올인초기화 <닉네임/순위> - 올인 쿨타임 초기화
  */
 
 /* ==================== 전역 상수 및 Java 타입 설정 ==================== */
@@ -100,7 +103,7 @@ function onMessage(msg) {
 
     const args = msg.content.substring(PREFIX.length).trim().split(/\s+/);
     const cmd = args[0];
-    const diceCommands = ["출석", "포인트", "지갑", "주사위", "올인", "랭킹", "지급"];
+    const diceCommands = ["출석", "포인트", "지갑", "주사위", "올인", "랭킹", "지급", "주사위추가", "주사위초기화", "올인초기화"];
 
     if (!diceCommands.includes(cmd)) return;
 
@@ -133,31 +136,92 @@ function onMessage(msg) {
 
     try {
         switch (cmd) {
-            case "지급": {
+            case "지급":
+            case "주사위추가":
+            case "주사위초기화":
+            case "올인초기화": {
+                // 관리자 권한 체크
                 if (!ADMIN_HASHES.includes(hash)) {
                     reply(`[🚫 권한 없음] 관리자만 사용 가능한 명령어입니다.`);
                     return;
                 }
 
+                // 정규식을 사용해 대상(따옴표 포함 또는 미포함) 및 숫자 값을 파싱
                 const contentStr = msg.content.substring(PREFIX.length).trim();
-                const match = contentStr.match(/^지급\s+"([^"]+)"\s+(-?\d+)$/);
+                const adminCmdMatch = contentStr.match(/^(지급|주사위추가|주사위초기화|올인초기화)\s+(?:"([^"]+)"|(\S+))(?:\s+(-?\d+))?$/);
 
-                if (!match) {
-                    reply(`[⚠️ 사용법] .지급 "닉네임" <금액>\n예시: .지급 "홍 길동" 1000`);
+                if (!adminCmdMatch) {
+                    reply(`[⚠️ 사용법]\n.지급 <닉네임/순위> <금액>\n.주사위추가 <닉네임/순위> <횟수>\n.주사위초기화 <닉네임/순위>\n.올인초기화 <닉네임/순위>\n* 띄어쓰기가 있는 닉네임은 "홍 길동" 처럼 따옴표로 감싸주세요.`);
                     return;
                 }
 
-                const targetName = match[1];
-                const amount = parseInt(match[2], 10);
+                const exactCmd = adminCmdMatch[1];
+                const targetStr = adminCmdMatch[2] || adminCmdMatch[3];
+                const numValue = adminCmdMatch[4] ? parseInt(adminCmdMatch[4], 10) : NaN;
 
-                const targetHash = Object.keys(db).find(k => db[k].name === targetName);
+                // 대상 유저 해시 찾기
+                let targetHash = null;
+
+                // 1) 순위로 입력된 경우
+                if (/^[0-9]+$/.test(targetStr)) {
+                    const rank = parseInt(targetStr, 10);
+                    const ranking = Object.keys(db)
+                        .map(h => ({ hash: h, pts: db[h].points }))
+                        .sort((a, b) => b.pts - a.pts);
+
+                    if (rank >= 1 && rank <= ranking.length) {
+                        targetHash = ranking[rank - 1].hash;
+                    }
+                }
+
+                // 2) 닉네임으로 찾기 (순위로 못 찾았거나, 이름이 숫자인 경우를 대비)
                 if (!targetHash) {
-                    reply(`[❌ 오류] '${targetName}' 유저를 찾을 수 없습니다.`);
+                    targetHash = Object.keys(db).find(k => db[k].name === targetStr);
+                }
+
+                if (!targetHash) {
+                    reply(`[❌ 오류] '${targetStr}' 대상을 찾을 수 없습니다. 올바른 닉네임이나 순위를 입력하세요.`);
                     return;
                 }
 
-                db[targetHash].points += amount;
-                reply(`[✅ 지급 완료]\n관리자가 ${targetName}님에게 ${amount.toLocaleString()}P를 지급했습니다.\n(대상 잔액: ${db[targetHash].points.toLocaleString()}P)`);
+                const targetUser = db[targetHash];
+
+                // 명령어 개별 처리
+                switch (exactCmd) {
+                    case "지급":
+                        if (isNaN(numValue)) {
+                            reply(`[⚠️ 오류] 지급할 금액을 입력해주세요.\n예: .지급 3 2000`);
+                            return;
+                        }
+                        targetUser.points += numValue;
+                        reply(`[✅ 지급 완료]\n관리자가 ${targetUser.name}님에게 ${numValue.toLocaleString()}P를 지급했습니다.\n(대상 잔액: ${targetUser.points.toLocaleString()}P)`);
+                        break;
+
+                    case "주사위추가":
+                        if (isNaN(numValue) || numValue <= 0) {
+                            reply(`[⚠️ 오류] 추가할 횟수를 올바르게 입력해주세요.\n예: .주사위추가 "홍 길동" 2`);
+                            return;
+                        }
+                        if (!isToday(targetUser.lastDice)) {
+                            targetUser.diceCountToday = 0;
+                        }
+                        // 횟수를 빼줌으로써 플레이 가능 횟수를 늘림
+                        targetUser.diceCountToday -= numValue;
+                        targetUser.lastDice = now; // 날짜가 바뀌어 초기화되는 것 방지
+                        reply(`[✅ 횟수 추가]\n관리자가 ${targetUser.name}님의 주사위 기회를 ${numValue}회 추가했습니다.`);
+                        break;
+
+                    case "주사위초기화":
+                        targetUser.diceCountToday = 0;
+                        targetUser.lastDice = now;
+                        reply(`[✅ 주사위 초기화]\n관리자가 ${targetUser.name}님의 오늘 주사위 횟수를 전부 초기화했습니다. (다시 처음부터 사용 가능)`);
+                        break;
+
+                    case "올인초기화":
+                        targetUser.lastAllIn = 0; // 타임스탬프를 0으로 만들어 오늘 안한 것으로 취급
+                        reply(`[✅ 올인 초기화]\n관리자가 ${targetUser.name}님의 올인 쿨타임을 초기화했습니다. (오늘 올인 1회 추가 가능)`);
+                        break;
+                }
                 break;
             }
 
@@ -203,9 +267,6 @@ function onMessage(msg) {
                     reply(`[💸 잔액 부족] 보유: ${user.points.toLocaleString()}P`);
                     return;
                 }
-
-                // 배팅 제한 삭제 (100% 배팅 가능)
-                // 대신 아래 배팅 결과에서 20%를 환급받도록 처리
 
                 user.points -= bet;
                 user.playCount++;
