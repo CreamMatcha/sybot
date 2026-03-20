@@ -1,5 +1,5 @@
 /**
- * @description 서윤봇 (Sybot) 주사위 게임 및 포인트 경제 시스템 (수정본 v3 + 관리자 기능 강화)
+ * @description 서윤봇 (Sybot) 주사위 게임 및 포인트 경제 시스템 (수정본 v4 + 보내기 기능 및 검색 고도화)
  * @environment MessengerBotR v0.7.41-alpha (GraalJS)
  * * [명령어 목록]
  * .출석 - 일일 지원금 2,000P + 랜덤 보너스 수령 (24시간 제한)
@@ -7,6 +7,7 @@
  * .주사위 <금액> - 조합형 게임 (일일 5회, 전액 배팅 가능, 꽝이어도 20% 페이백 보장)
  * .올인 - D100 기반 크리티컬 도박 (100% 자동 베팅, 파산 시 구제 이벤트)
  * .랭킹 - 전체 사용자 포인트 순위 확인
+ * .보내기 <닉네임/순위> <금액> - 다른 유저에게 포인트 송금
  * * [관리자 명령어]
  * .지급 <닉네임/순위> <금액> - 특정 유저에게 포인트 지급
  * .주사위추가 <닉네임/순위> <횟수> - 주사위 기회 추가 부여
@@ -92,6 +93,44 @@ function getTimeUntilMidnight() {
     return `${hours}시간 ${mins}분 ${secs}초`;
 }
 
+/**
+ * @description 검색어(순위/전체닉네임/부분닉네임)로 타겟 유저 해시를 찾는 함수
+ */
+function resolveTargetUser(db, targetStr) {
+    // 1. 순위 번호로 검색 (숫자로만 이루어진 경우)
+    if (/^[0-9]+$/.test(targetStr)) {
+        const rank = parseInt(targetStr, 10);
+        const ranking = Object.keys(db)
+            .map(h => ({ hash: h, pts: db[h].points }))
+            .sort((a, b) => b.pts - a.pts);
+
+        if (rank >= 1 && rank <= ranking.length) {
+            return { hash: ranking[rank - 1].hash, error: null };
+        }
+    }
+
+    // 2. 정확한 닉네임 일치 검색
+    let exactHash = Object.keys(db).find(k => db[k].name === targetStr);
+    if (exactHash) {
+        return { hash: exactHash, error: null };
+    }
+
+    // 3. 부분 닉네임 일치 검색 (포함하는 단어)
+    let partialMatches = Object.keys(db).filter(k => db[k].name.includes(targetStr));
+
+    if (partialMatches.length === 1) {
+        // 일치하는 사람이 딱 한 명일 경우
+        return { hash: partialMatches[0], error: null };
+    } else if (partialMatches.length > 1) {
+        // 일치하는 사람이 여러 명일 경우
+        const matchNames = partialMatches.map(h => db[h].name).join(", ");
+        return { hash: null, error: `[⚠️ 대상 중복] '${targetStr}' 키워드가 포함된 유저가 여러 명입니다. 대상을 더 정확히 입력해주세요.\n(검색된 유저: ${matchNames})` };
+    }
+
+    // 4. 해당하는 유저가 없을 경우
+    return { hash: null, error: `[❌ 대상 없음] '${targetStr}' 대상을 찾을 수 없습니다.` };
+}
+
 /* ==================== 메인 게임 핸들러 ==================== */
 
 function onMessage(msg) {
@@ -103,9 +142,12 @@ function onMessage(msg) {
 
     const args = msg.content.substring(PREFIX.length).trim().split(/\s+/);
     const cmd = args[0];
-    const diceCommands = ["출석", "포인트", "지갑", "주사위", "올인", "랭킹", "지급", "주사위추가", "주사위초기화", "올인초기화"];
+    const commandsList = [
+        "출석", "포인트", "지갑", "주사위", "올인", "랭킹",
+        "보내기", "지급", "주사위추가", "주사위초기화", "올인초기화"
+    ];
 
-    if (!diceCommands.includes(cmd)) return;
+    if (!commandsList.includes(cmd)) return;
 
     const db = loadUserData();
     const hash = msg.author.hash;
@@ -136,58 +178,68 @@ function onMessage(msg) {
 
     try {
         switch (cmd) {
+            case "보내기":
             case "지급":
             case "주사위추가":
             case "주사위초기화":
             case "올인초기화": {
-                // 관리자 권한 체크
-                if (!ADMIN_HASHES.includes(hash)) {
+                // 관리자 명령어인지 체크
+                const isAdminCmd = ["지급", "주사위추가", "주사위초기화", "올인초기화"].includes(cmd);
+
+                if (isAdminCmd && !ADMIN_HASHES.includes(hash)) {
                     reply(`[🚫 권한 없음] 관리자만 사용 가능한 명령어입니다.`);
                     return;
                 }
 
                 // 정규식을 사용해 대상(따옴표 포함 또는 미포함) 및 숫자 값을 파싱
                 const contentStr = msg.content.substring(PREFIX.length).trim();
-                const adminCmdMatch = contentStr.match(/^(지급|주사위추가|주사위초기화|올인초기화)\s+(?:"([^"]+)"|(\S+))(?:\s+(-?\d+))?$/);
+                const targetCmdMatch = contentStr.match(/^(보내기|지급|주사위추가|주사위초기화|올인초기화)\s+(?:"([^"]+)"|(\S+))(?:\s+(-?\d+))?$/);
 
-                if (!adminCmdMatch) {
-                    reply(`[⚠️ 사용법]\n.지급 <닉네임/순위> <금액>\n.주사위추가 <닉네임/순위> <횟수>\n.주사위초기화 <닉네임/순위>\n.올인초기화 <닉네임/순위>\n* 띄어쓰기가 있는 닉네임은 "홍 길동" 처럼 따옴표로 감싸주세요.`);
-                    return;
-                }
-
-                const exactCmd = adminCmdMatch[1];
-                const targetStr = adminCmdMatch[2] || adminCmdMatch[3];
-                const numValue = adminCmdMatch[4] ? parseInt(adminCmdMatch[4], 10) : NaN;
-
-                // 대상 유저 해시 찾기
-                let targetHash = null;
-
-                // 1) 순위로 입력된 경우
-                if (/^[0-9]+$/.test(targetStr)) {
-                    const rank = parseInt(targetStr, 10);
-                    const ranking = Object.keys(db)
-                        .map(h => ({ hash: h, pts: db[h].points }))
-                        .sort((a, b) => b.pts - a.pts);
-
-                    if (rank >= 1 && rank <= ranking.length) {
-                        targetHash = ranking[rank - 1].hash;
+                if (!targetCmdMatch) {
+                    if (cmd === "보내기") {
+                        reply(`[⚠️ 사용법]\n.보내기 <닉네임/순위> <금액>\n* 띄어쓰기가 있는 닉네임은 "홍 길동" 처럼 따옴표로 감싸주세요.`);
+                    } else {
+                        reply(`[⚠️ 사용법]\n.지급 <닉네임/순위> <금액>\n.주사위추가 <닉네임/순위> <횟수>\n.주사위초기화 <닉네임/순위>\n.올인초기화 <닉네임/순위>\n* 띄어쓰기가 있는 닉네임은 "홍 길동" 처럼 따옴표로 감싸주세요.`);
                     }
-                }
-
-                // 2) 닉네임으로 찾기 (순위로 못 찾았거나, 이름이 숫자인 경우를 대비)
-                if (!targetHash) {
-                    targetHash = Object.keys(db).find(k => db[k].name === targetStr);
-                }
-
-                if (!targetHash) {
-                    reply(`[❌ 오류] '${targetStr}' 대상을 찾을 수 없습니다. 올바른 닉네임이나 순위를 입력하세요.`);
                     return;
                 }
 
+                const exactCmd = targetCmdMatch[1];
+                const targetStr = targetCmdMatch[2] || targetCmdMatch[3];
+                const numValue = targetCmdMatch[4] ? parseInt(targetCmdMatch[4], 10) : NaN;
+
+                // 공통: 타겟 유저 찾기 (순위, 정확도, 부분일치 우선순위)
+                const targetResult = resolveTargetUser(db, targetStr);
+
+                if (targetResult.error) {
+                    reply(targetResult.error);
+                    return;
+                }
+
+                const targetHash = targetResult.hash;
                 const targetUser = db[targetHash];
 
-                // 명령어 개별 처리
+                // 개별 명령어 동작 처리
                 switch (exactCmd) {
+                    case "보내기":
+                        if (isNaN(numValue) || numValue <= 0) {
+                            reply(`[⚠️ 오류] 보낼 금액을 1P 이상 정확히 입력해주세요.`);
+                            return;
+                        }
+                        if (targetHash === hash) {
+                            reply(`[⚠️ 오류] 자기 자신에게는 포인트를 보낼 수 없습니다.`);
+                            return;
+                        }
+                        if (user.points < numValue) {
+                            reply(`[💸 잔액 부족] 보유: ${user.points.toLocaleString()}P`);
+                            return;
+                        }
+
+                        user.points -= numValue;
+                        targetUser.points += numValue;
+                        reply(`[💸 송금 완료]\n${name}님이 ${targetUser.name}님에게 ${numValue.toLocaleString()}P를 보냈습니다.\n(내 잔액: ${user.points.toLocaleString()}P)`);
+                        break;
+
                     case "지급":
                         if (isNaN(numValue)) {
                             reply(`[⚠️ 오류] 지급할 금액을 입력해주세요.\n예: .지급 3 2000`);
@@ -275,8 +327,7 @@ function onMessage(msg) {
 
                 const d = [rollD6(), rollD6(), rollD6()];
                 const sum = d[0] + d[1] + d[2];
-                const sorted = [...d].sort((a, b) => a - b);
-
+                const sorted = d.slice().sort((a, b) => a - b);
                 let mult = 0;
                 let desc = "";
 
@@ -284,14 +335,12 @@ function onMessage(msg) {
                 else if (sorted[0] + 1 === sorted[1] && sorted[1] + 1 === sorted[2]) { mult = 3; desc = "✨ [스트레이트!]"; }
                 else if (d[0] === d[1] || d[1] === d[2] || d[0] === d[2]) { mult = 1.5; desc = "🎲 [더블!]"; }
                 else if (sum >= 14) { mult = 1; desc = "👍 [하이 롤!]"; }
-                else { mult = 0.2; desc = "💥 [꽝] (20% 보증 환급)"; } // 꽝이어도 20% 페이백 적용
+                else { mult = 0.2; desc = "💥 [꽝] (20% 보증 환급)"; }
 
                 const win = Math.floor(bet * mult);
                 user.points += win;
 
-                // 출력 메시지 (성공 시 획득량 표기, 실패(0.2배) 시 잃은 량 표기)
                 const resultText = mult >= 1 ? `+${win.toLocaleString()}P` : `-${(bet - win).toLocaleString()}P`;
-
                 reply(`[🎲 결과: ${d.join(", ")}]\n${desc}\n${resultText}\n잔액: ${user.points.toLocaleString()}P`);
                 break;
             }
@@ -307,7 +356,6 @@ function onMessage(msg) {
                     return;
                 }
 
-                // 보유 포인트의 100% 자동 배팅
                 const amount = user.points;
 
                 user.points -= amount;
@@ -342,16 +390,16 @@ function onMessage(msg) {
                     status = "📉 [실패] 배팅액을 전부 잃었습니다...";
                 }
 
-                // 올인으로 잔액이 0이 되었을 경우 구제금 시스템 발동
+                // 올인 구제금
                 if (final === 0) {
                     const isJackpot = Math.random() < 0.05; // 5% 확률 대박
                     let reliefPoints = 0;
 
                     if (isJackpot) {
-                        reliefPoints = Math.floor(Math.random() * 40001) + 10000; // 10,000 ~ 50,000
+                        reliefPoints = Math.floor(Math.random() * 40001) + 10000;
                         status += `\n\n🍀 [기적의 동아줄!] 지나가던 거부가 파산한 당신을 가엾게 여겨 ${reliefPoints.toLocaleString()}P를 적선했습니다!!`;
                     } else {
-                        reliefPoints = Math.floor(Math.random() * 901) + 100; // 100 ~ 1,000
+                        reliefPoints = Math.floor(Math.random() * 901) + 100;
                         status += `\n\n🪙 [파산 구제금] 길바닥을 뒤져 ${reliefPoints.toLocaleString()}P를 찾아냈습니다...`;
                     }
                     final += reliefPoints;
