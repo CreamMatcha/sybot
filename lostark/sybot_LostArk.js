@@ -958,12 +958,19 @@ function findRaidCandidates(db, query) {
 function renderRaidBlock(raidName, diff, gates) {
     var res = "◦ " + raidName + " (" + diff + ")\n";
     var totalGold = 0;
+    var totalMoreGold = 0; // 더보기 총합을 담을 변수 추가
+
     for (var i = 0; i < gates.length; i++) {
         var g = gates[i];
         res += (i + 1) + "관: " + g.gold + "G (더보기 -" + g.moreGold + "G)\n";
         totalGold += g.gold;
+        totalMoreGold += g.moreGold; // 각 관문의 더보기 비용을 합산
     }
-    res += "총합: " + totalGold + "G";
+
+    // 총합 옆에 (더보기값을 제한 골드)를 계산하여 표시
+    var netGold = totalGold - totalMoreGold;
+    res += "총합: " + totalGold + "G (" + netGold + "G)";
+
     return res;
 }
 
