@@ -6,7 +6,7 @@
         {
           "gate": 1,
           "gold": 13500,
-          "moreGold": 0,
+          "moreGold": 4320,
           "clear": [
             {
               "name": "파편",
@@ -23,7 +23,7 @@
         {
           "gate": 2,
           "gold": 16500,
-          "moreGold": 0,
+          "moreGold": 5280,
           "clear": [
             {
               "name": "파편",
@@ -42,7 +42,7 @@
         {
           "gate": 1,
           "gold": 16000,
-          "moreGold": 0,
+          "moreGold": 5120,
           "clear": [
             {
               "name": "파편",
@@ -59,7 +59,7 @@
         {
           "gate": 2,
           "gold": 24000,
-          "moreGold": 0,
+          "moreGold": 7680,
           "clear": [
             {
               "name": "파편",
@@ -78,7 +78,7 @@
         {
           "gate": 1,
           "gold": 20000,
-          "moreGold": 0,
+          "moreGold": 6400,
           "clear": [
             {
               "name": "파편",
@@ -95,7 +95,7 @@
         {
           "gate": 2,
           "gold": 30000,
-          "moreGold": 0,
+          "moreGold": 9600,
           "clear": [
             {
               "name": "파편",
