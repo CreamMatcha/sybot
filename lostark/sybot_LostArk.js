@@ -1402,6 +1402,46 @@ function fetchAccessories(charNameRaw) {
     return { ok: true, name: charName, content: out.join("\n").trim() };
 }
 
+// ==========================================
+// 직업 시너지 데이터 및 처리 함수
+// ==========================================
+var SYNERGY_DATA = [
+    { category: "전사 (슈샤이어)", content: "워로드(고기): 피증 4, 백헤드 5\n워로드(전태): 방감 12, 피증 4, 백헤드 5\n버서커: 피증 6\n디트: 방감 12\n슬레: 피증 6\n발키리: 치명타 시 적주피 8" },
+    { category: "무도가 (애니츠)", content: "창술: 치명타 시 적주피 8\n배마: 치적 10, 공속 8, 이속 16\n기공: 공증 6, 받피감 25\n인파: 피증 6\n스커: 치적 10, 공속 8\n브커: 피증 6" },
+    { category: "헌터 (아르데타인)", content: "데헌: 치적 10\n호크: 피증 6, 이속 4(두동)\n블래: 방감 12\n스카: 공증 6건슬: 치적 10\n" },
+    { category: "마법사 (실린)", content: "서머너: 방감 12, 마나회복 40 (트포 선택)\n알카: 치적 10\n소서: 피증 6" },
+    { category: "암살자 (데런)", content: "데모닉: 피증 6\n리퍼: 방감 12\n소울: 피증 6\n블레: 피증 4, 백헤드 5, 공속 25, 이속 20" },
+    { category: "스페셜리스트 (요즈)", content: "기상(질풍): 치적 10, 공이속 12\n기상(이슬비): 치적 10, 공감 10\n환수사: 방감 12" }, ,
+    { category: "가디언나이트 (가나)", content: "가디언나이트: 피증 6" },
+    { category: "딜서폿", content: "바드: 방감 12\n도화가: 방감 12\n홀나: 치명타 시 적주피 8" }
+];
+
+function getSynergyText(query) {
+    var title = "◦ 직업 시너지";
+    var results = [];
+    var search = (query || "").trim();
+
+    // 검색어가 있는 경우 카테고리에 해당 단어가 포함되어 있는지 확인
+    if (search) {
+        for (var i = 0; i < SYNERGY_DATA.length; i++) {
+            if (SYNERGY_DATA[i].category.indexOf(search) !== -1) {
+                results.push(SYNERGY_DATA[i]);
+            }
+        }
+    }
+
+    // 검색 결과가 없거나 검색어를 입력하지 않은 경우 전체 출력
+    var targetList = (results.length > 0) ? results : SYNERGY_DATA;
+    var out = [title];
+
+    for (var j = 0; j < targetList.length; j++) {
+        out.push("\n• " + targetList[j].category);
+        out.push(targetList[j].content);
+    }
+
+    return out.join("\n").trim();
+}
+
 // 메시지 리스너
 bot.addListener(Event.MESSAGE, function (msg) {
     var room = msg.room || "";
@@ -1793,6 +1833,21 @@ bot.addListener(Event.MESSAGE, function (msg) {
         return;
     }
 
+    // 시너지 조회
+    // .시너지, .ㅅㄴㅈ, ㅅㄴㅈ 와 매칭되며 뒤에 검색어가 올 수 있음
+    var mSynergy = content.match(/^(?:\.시너지|\.?ㅅㄴㅈ)(?:\s+(.+))?$/);
+    if (mSynergy) {
+        var synergyQuery = mSynergy[1] || "";
+        logCommand(msg, "시너지 조회", synergyQuery);
+
+        try {
+            var synergyResult = getSynergyText(synergyQuery);
+            msg.reply(synergyResult);
+        } catch (e) {
+            handleApiError(msg, e, "시너지 조회");
+        }
+        return;
+    }
 });
 
 
