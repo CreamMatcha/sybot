@@ -7,6 +7,7 @@ const FEEDBACK_ROOM = "서윤봇 제보방";
 // [설정] 파일 경로
 const SD_ROOT = FileStream.getSdcardPath();
 const FOOD_FILE_PATH = SD_ROOT + "/Sybot/foodList.json";
+var WEBHOOK_URL = "https://discord.com/api/webhooks/1488172055009558598/b-qWJIm5Xx-VetibYY8N-TG7hTe5YueLcw39uICvSKKnFonjcQQMY6VnQKocq0GyE5pG";
 
 // [로깅 헬퍼]
 function logCommand(msg, cmdType, arg) {
@@ -58,11 +59,15 @@ bot.addListener(Event.MESSAGE, function (msg) {
             "   .보석(ㅂㅅ) : 캐릭터 보석 조회\n" +
             "   .팔찌(ㅍㅉ) : 캐릭터 팔찌 조회\n" +
             "   .아크그리드(ㄱㄹㄷ) : 캐릭터 아크그리드 조회\n\n" +
+            "   .악세(ㅇㅅ) : 캐릭터 악세 조회\n" +
+            "   .부캐(ㅂㅋ) : 원정대 조회\n" +
             "   .클골(ㅋㄱ) : 레이드 클골(보상) 조회\n" +
-            "   .지옥(ㅈㅇ) : 지옥 강하 추천\n" +
-            "   .유각(ㅇㄱ) : 유각 시세\n" +
-            "   .패치(ㅍㅊ) : 최신 패치노트 조회\n" +
+            "   .지옥(ㅈㅇ) (숫자)(ex.ㅈㅇ 6) : 지옥 강하 추천\n" +
+            "   .유각(ㅂㅆㅇㄱ) : 유각 시세\n" +
+            "   .패치(ㅍㅊㄴㅌ, .ㅍㅊ) : 최신 패치노트 조회\n" +
             "   .모험섬(.쌀) : 골드 모험섬 조회\n" +
+            "   .주급(ㅈㄱ) : 원정대 주급 조회\n" +
+            "   .시너지(ㅅㄴㅈ) : 직업 시너지 조회\n" +
             "\n\n2. 기타 기능\n\n" +
             "   .점메추/저메추(ㅈㅁㅊ)\n" +
             "   A vs B\n" +
@@ -145,25 +150,36 @@ bot.addListener(Event.MESSAGE, function (msg) {
         logCommand(msg, "건의사항 접수", feedback);
 
         try {
-            var reportMsg = "📢 [건의/제보 도착]\n" +
-                "--------------------\n" +
-                "발신: " + msg.room + "\n" +
-                "인물: " + msg.author.name + "\n" +
-                "내용: " + feedback;
+            var reportMsg = "📢 **[건의/제보 도착]**\n" +
+                "> **발신:** " + msg.room + "\n" +
+                "> **인물:** " + msg.author.name + "\n" +
+                "> **내용:** " + feedback;
 
-            // ★ 핵심 변경: bot.send(방이름, 내용) 사용
-            var success = bot.send(FEEDBACK_ROOM, reportMsg);
+            // java.net 패키지를 이용한 HTTP POST 요청 (로아 API 요청과 비슷한 원리)
+            var url = new java.net.URL(WEBHOOK_URL);
+            var conn = url.openConnection();
+            conn.setRequestMethod("POST");
+            conn.setRequestProperty("Content-Type", "application/json; utf-8");
+            conn.setDoOutput(true);
 
-            if (success) {
-                msg.reply("소중한 의견 감사합니다! 개발자에게 바로 전송됐어요. 🚀");
+            // 디스코드 웹훅 규격에 맞는 JSON 생성
+            var jsonPayload = JSON.stringify({ "content": reportMsg });
+
+            var os = conn.getOutputStream();
+            os.write(new java.lang.String(jsonPayload).getBytes("UTF-8"));
+            os.flush();
+            os.close();
+
+            var responseCode = conn.getResponseCode();
+            if (responseCode >= 200 && responseCode < 300) {
+                msg.reply("소중한 의견 감사합니다! 개발자에게 즉각 전송됐어요. 🚀");
             } else {
-                // 봇이 그 방에 없거나 세션이 끊긴 경우
-                Log.e("전송 실패: '" + FEEDBACK_ROOM + "' 방 세션 없음");
-                msg.reply("전송에 실패했어요. \n@chococo_7로 dm주세요.");
+                throw new Error("HTTP " + responseCode);
             }
 
         } catch (e) {
-            handleError(msg, e, "건의사항 전송");
+            handleError(msg, e, "건의사항 웹훅 전송");
+            msg.reply("전송에 실패했어요. \n@chococo_7로 dm주세요.");
         }
         return;
     }
