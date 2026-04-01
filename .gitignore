@@ -15,5 +15,5 @@ yarn-debug.log*
 .DS_Store
 Thumbs.db
 
-# Test (선택)
-*runeGame_test.js
+# 설정 파일 및 민감한 정보 제외
+config.json
