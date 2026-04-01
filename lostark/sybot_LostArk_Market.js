@@ -7,8 +7,6 @@ const bot = BotManager.getCurrentBot();
 
 /* ==================== [설정] ==================== */
 
-// 로스트아크 API 키
-const LOSTARK_API_KEY = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6IktYMk40TkRDSTJ5NTA5NWpjTWk5TllqY2lyZyIsImtpZCI6IktYMk40TkRDSTJ5NTA5NWpjTWk5TllqY2lyZyJ9.eyJpc3MiOiJodHRwczovL2x1ZHkuZ2FtZS5vbnN0b3ZlLmNvbSIsImF1ZCI6Imh0dHBzOi8vbHVkeS5nYW1lLm9uc3RvdmUuY29tL3Jlc291cmNlcyIsImNsaWVudF9pZCI6IjEwMDAwMDAwMDAyNTQ2NjAifQ.E9LoI03kRumrluMGtS5G1XlIH0sRY7-xRWaa6G_-t_X5mhoeJqEsyz-aknmSFf8BbVX00S8Gl7TibmaQCwY5nbMARPLwfhJJ_kN3u1euaf0PWnr4hI-WnsSqt0fDfv5OWcXDaAaY21-lJwSSst9JhQbQlnvBB4dH9le0tl4ZSn_DWsvrHk972MSPJYZuHt3oggsnaD2_X8fDEjHpv3UDV1im7DWmCKUlSk-60I9al4OKxxOvaJCtAcz5rAOrEDj1XyrxaLwfvFF5jBVZiZygot6VjnuFdfyP0fmz2lKmzloXWekquDjL4mWLnubkSm5JkZvQbdS1vm2mVPu6_bFULA";
 
 // 봇이 동작할 방 목록 (비어있으면 모든 방에서 동작)
 const ALLOWED_ROOMS = [];
@@ -16,6 +14,52 @@ const ALLOWED_ROOMS = [];
 // Java 클래스 로드
 const Jsoup = Java.type("org.jsoup.Jsoup");
 const Connection = Java.type("org.jsoup.Connection");
+
+// 파일 경로
+const CONFIG_PATH = "/sdcard/Sybot/config.json";
+
+/** @type {object} 전역 설정 객체 선언 (누락 방지) */
+let config = {};
+
+// [설정] config 관련 설정
+const MAIN_DEFAULT_CONFIG = {
+    LOSTARK_API_KEY: "no_API_KEY"
+};
+
+function loadConfig(filePath, defaultData) {
+    try {
+        if (!FileStream.exists(filePath)) {
+            FileStream.writeJson(filePath, defaultData);
+            Log.i("기본 설정 파일을 생성했습니다: " + filePath);
+            return defaultData;
+        }
+
+        let loadedData = FileStream.readJson(filePath);
+        let isUpdated = false;
+
+        for (let key in defaultData) {
+            if (loadedData[key] === undefined) {
+                loadedData[key] = defaultData[key];
+                isUpdated = true;
+            }
+        }
+
+        if (isUpdated) {
+            FileStream.writeJson(filePath, loadedData);
+            Log.i("설정 파일에 누락된 새 항목을 추가했습니다.");
+        }
+
+        return loadedData;
+    } catch (e) {
+        Log.e("설정 로드 중 오류 발생: " + e.message);
+        return defaultData;
+    }
+}
+
+function init() {
+    config = loadConfig(CONFIG_PATH, MAIN_DEFAULT_CONFIG);
+    Log.i("설정 로드 완료!");
+}
 
 
 /* ==================== [유틸리티] ==================== */
@@ -67,6 +111,10 @@ function fetchLostarkApi(urlStr, headers, bodyObj) {
 /**
  * @description 메시지 수신 이벤트
  */
+
+init();
+
+bot.addListener(Event.START_COMPILE, init);
 bot.addListener(Event.MESSAGE, (msg) => {
     // 1. 방 제한 확인
     if (ALLOWED_ROOMS.length > 0 && !ALLOWED_ROOMS.includes(msg.room)) return;
@@ -80,7 +128,7 @@ bot.addListener(Event.MESSAGE, (msg) => {
 
             const headers = {
                 "accept": "application/json",
-                "authorization": `bearer ${LOSTARK_API_KEY}`,
+                "authorization": `bearer ${config.LOSTARK_API_KEY}`,
                 "Content-Type": "application/json"
             };
 
@@ -103,7 +151,7 @@ bot.addListener(Event.MESSAGE, (msg) => {
                     return;
                 }
 
-                let resultMsg = "유각 시세\n\n";
+                let resultMsg = "유각 시세\n";
                 const limit = Math.min(items.length, 10);
 
                 for (let i = 0; i < limit; i++) {
