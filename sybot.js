@@ -1,13 +1,56 @@
 const bot = BotManager.getCurrentBot();
 const ALLOWED_ROOMS = [];
 
-// [설정] 건의사항을 받을 관리자 방 이름 (정확해야 합니다!)
-const FEEDBACK_ROOM = "서윤봇 제보방";
 
 // [설정] 파일 경로
 const SD_ROOT = FileStream.getSdcardPath();
+const CONFIG_PATH = "/sdcard/Sybot/config.json";
 const FOOD_FILE_PATH = SD_ROOT + "/Sybot/foodList.json";
-var WEBHOOK_URL = "https://discord.com/api/webhooks/1488172055009558598/b-qWJIm5Xx-VetibYY8N-TG7hTe5YueLcw39uICvSKKnFonjcQQMY6VnQKocq0GyE5pG";
+
+/** @type {object} 전역 설정 객체 선언 (누락 방지) */
+let config = {};
+
+// [설정] config 관련 설정
+const MAIN_DEFAULT_CONFIG = {
+    ADMIN_HASH: "no_HASH",
+    DISCORD_WEBHOOK_URL: "no_URL"
+};
+
+
+function loadConfig(filePath, defaultData) {
+    try {
+        if (!FileStream.exists(filePath)) {
+            FileStream.writeJson(filePath, defaultData);
+            Log.i("기본 설정 파일을 생성했습니다: " + filePath);
+            return defaultData;
+        }
+
+        let loadedData = FileStream.readJson(filePath);
+        let isUpdated = false;
+
+        for (let key in defaultData) {
+            if (loadedData[key] === undefined) {
+                loadedData[key] = defaultData[key];
+                isUpdated = true;
+            }
+        }
+
+        if (isUpdated) {
+            FileStream.writeJson(filePath, loadedData);
+            Log.i("설정 파일에 누락된 새 항목을 추가했습니다.");
+        }
+
+        return loadedData;
+    } catch (e) {
+        Log.e("설정 로드 중 오류 발생: " + e.message);
+        return defaultData;
+    }
+}
+
+function init() {
+    config = loadConfig(CONFIG_PATH, MAIN_DEFAULT_CONFIG);
+    Log.i("설정 로드 완료!");
+}
 
 // [로깅 헬퍼]
 function logCommand(msg, cmdType, arg) {
@@ -40,6 +83,9 @@ function getRandomFood() {
 /**
  * [API 2 메인 리스너]
  */
+init();
+
+bot.addListener(Event.START_COMPILE, init);
 bot.addListener(Event.MESSAGE, function (msg) {
     // 1. 방 제한 체크
     if (ALLOWED_ROOMS.length > 0 && ALLOWED_ROOMS.indexOf(msg.room) === -1) return;
@@ -125,10 +171,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
         try {
             var p = Math.floor(Math.random() * 101);
 
-            // 보낸 사람 이름 가져오기
-            var name = msg.author.name;
-
-            msg.reply(name + "이(가) " + question + " 확률은 " + p + "%...");
+            msg.reply("음.. " + question + " 확률은 " + p + "%...");
 
         } catch (e) {
             handleError(msg, e, "확률 체크");
@@ -156,7 +199,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
                 "> **내용:** " + feedback;
 
             // java.net 패키지를 이용한 HTTP POST 요청 (로아 API 요청과 비슷한 원리)
-            var url = new java.net.URL(WEBHOOK_URL);
+            var url = new java.net.URL(config.DISCORD_WEBHOOK_URL);
             var conn = url.openConnection();
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json; utf-8");

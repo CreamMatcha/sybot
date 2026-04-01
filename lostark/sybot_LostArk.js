@@ -10,7 +10,6 @@ var ALLOWED_ROOMS = [];
 
 // 출력 옵션
 const ARK_OPTS = {
-    showConditions: false,   // 코어 "발동 조건"도 같이 보여줄지
     log: true
 };
 function dbg() { if (ARK_OPTS.log) try { Log.i.apply(Log, ["[ARK]"].concat([].slice.call(arguments))); } catch (_) { } }
@@ -23,8 +22,6 @@ function isAllowedRoom(roomName) {
     } catch (_) { return true; }
 }
 
-// API 키
-var LOSTARK_API_KEY = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6IktYMk40TkRDSTJ5NTA5NWpjTWk5TllqY2lyZyIsImtpZCI6IktYMk40TkRDSTJ5NTA5NWpjTWk5TllqY2lyZyJ9.eyJpc3MiOiJodHRwczovL2x1ZHkuZ2FtZS5vbnN0b3ZlLmNvbSIsImF1ZCI6Imh0dHBzOi8vbHVkeS5nYW1lLm9uc3RvdmUuY29tL3Jlc291cmNlcyIsImNsaWVudF9pZCI6IjEwMDAwMDAwMDAyNTQ2NjAifQ.E9LoI03kRumrluMGtS5G1XlIH0sRY7-xRWaa6G_-t_X5mhoeJqEsyz-aknmSFf8BbVX00S8Gl7TibmaQCwY5nbMARPLwfhJJ_kN3u1euaf0PWnr4hI-WnsSqt0fDfv5OWcXDaAaY21-lJwSSst9JhQbQlnvBB4dH9le0tl4ZSn_DWsvrHk972MSPJYZuHt3oggsnaD2_X8fDEjHpv3UDV1im7DWmCKUlSk-60I9al4OKxxOvaJCtAcz5rAOrEDj1XyrxaLwfvFF5jBVZiZygot6VjnuFdfyP0fmz2lKmzloXWekquDjL4mWLnubkSm5JkZvQbdS1vm2mVPu6_bFULA"; // 예) "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 var LOSTARK_BASE = "https://developer-lostark.game.onstove.com";
 
 // 전역 토글
@@ -32,7 +29,55 @@ var LOA_DEBUG = true;
 
 // 파일 경로
 const RAID_REWARD_FILE = "sdcard/Sybot/raid_rewards.json";
+const CONFIG_PATH = "/sdcard/Sybot/config.json";
+
 let _raidRewardCache = null;
+
+/** @type {object} 전역 설정 객체 선언 (누락 방지) */
+let config = {};
+
+// [설정] config 관련 설정
+const MAIN_DEFAULT_CONFIG = {
+    ADMIN_HASH: "no_HASH",
+    WEBHOOK_URL: "no_URL",
+    LOSTARK_API_KEY: "no_API_KEY"
+};
+
+function loadConfig(filePath, defaultData) {
+    try {
+        if (!FileStream.exists(filePath)) {
+            FileStream.writeJson(filePath, defaultData);
+            Log.i("기본 설정 파일을 생성했습니다: " + filePath);
+            return defaultData;
+        }
+
+        let loadedData = FileStream.readJson(filePath);
+        let isUpdated = false;
+
+        for (let key in defaultData) {
+            if (loadedData[key] === undefined) {
+                loadedData[key] = defaultData[key];
+                isUpdated = true;
+            }
+        }
+
+        if (isUpdated) {
+            FileStream.writeJson(filePath, loadedData);
+            Log.i("설정 파일에 누락된 새 항목을 추가했습니다.");
+        }
+
+        return loadedData;
+    } catch (e) {
+        Log.e("설정 로드 중 오류 발생: " + e.message);
+        return defaultData;
+    }
+}
+
+function init() {
+    config = loadConfig(CONFIG_PATH, MAIN_DEFAULT_CONFIG);
+    Log.i("설정 로드 완료!");
+}
+
 
 // 로깅 헬퍼 함수: [방이름/보낸사람] 명령어: 인자 형태
 function logCommand(msg, cmdType, arg) {
@@ -199,7 +244,7 @@ function fetchCombatPower(charNameRaw) {
     // 요청 시작 로그
     Log.i("[LOA] fetchCombatPower START char=" + charName + " url=" + url);
 
-    var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+    var res = httpGetUtf8(url, { "authorization": "bearer " + config.config.LOSTARK_API_KEY });
     var dt = java.lang.System.currentTimeMillis() - t0;
 
     if (!res.ok) {
@@ -267,7 +312,7 @@ function fetchParadisePower(charNameRaw) {
     var url = LOSTARK_BASE + "/armories/characters/" + charName + "/equipment";
 
     var t0 = java.lang.System.currentTimeMillis();
-    var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+    var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
     var dt = java.lang.System.currentTimeMillis() - t0;
 
     if (!res.ok) {
@@ -325,7 +370,7 @@ function fetchBracelet(charNameRaw) {
     var charName = String(charNameRaw);
     var url = LOSTARK_BASE + "/armories/characters/" + charName + "/equipment";
 
-    var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+    var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
     if (!res.ok) {
         if (res.code === 404) return { ok: false, reason: "NOT_FOUND" };
         return { ok: false, reason: "HTTP_" + res.code };
@@ -480,13 +525,6 @@ function formatCoreActivationList(slots) {
         var plain = tooltipToPlainText(blockHtml);
         plain.split("\n").map(function (l) { return l.trim(); }).filter(Boolean)
             .forEach(function (l) { out.push(l); });
-        // (선택) 발동 조건
-        if (ARK_OPTS.showConditions) {
-            var condHtml = getCoreConditionBlock(s.Tooltip);
-            var condPlain = tooltipToPlainText(condHtml);
-            condPlain.split("\n").map(function (l) { return l.trim(); }).filter(Boolean)
-                .forEach(function (l) { out.push("[조건] " + l); });
-        }
     }
     return out.join("\n");
 }
@@ -540,7 +578,7 @@ function fetchProfileClassName(charNameRaw) {
     try {
         var charName = String(charNameRaw);
         var url = LOSTARK_BASE + "/armories/characters/" + charName + "/profiles";
-        var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+        var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
         if (!res.ok) return null;
         var js = JSON.parse(res.text || "{}");
         if (js && js.CharacterClassName) return String(js.CharacterClassName);
@@ -558,7 +596,7 @@ function fetchArkGrid(charNameRaw) {
     var url = LOSTARK_BASE + "/armories/characters/" + charName + "/arkgrid";
     var t0 = java.lang.System.currentTimeMillis();
     Log.i("[LOA] ArkGrid START char=" + charName + " url=" + url);
-    var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+    var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
     var dt = java.lang.System.currentTimeMillis() - t0;
 
     if (!res.ok) {
@@ -610,7 +648,7 @@ function fetchGems(charNameRaw) {
     var t0 = java.lang.System.currentTimeMillis();
     Log.i("[LOA] Gems START char=" + charName + " url=" + url);
 
-    var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+    var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
     var dt = java.lang.System.currentTimeMillis() - t0;
 
     if (!res.ok) {
@@ -891,22 +929,6 @@ function readTextUtf8(path) {
     }
 }
 
-function loadRaidRewards() {
-    if (_raidRewardCache) return _raidRewardCache;
-
-    var txt = readTextUtf8(RAID_REWARD_FILE);
-    if (!txt) return null;
-
-    try {
-        var js = JSON.parse(String(txt));
-        if (!js || !js.raids) return null;
-        _raidRewardCache = js;
-        return _raidRewardCache;
-    } catch (e) {
-        try { Log.e("[RAID] JSON parse error: " + e); } catch (_) { }
-        return null;
-    }
-}
 
 function _normKey(s) {
     return String(s || "").replace(/\s+/g, "").toLowerCase();
@@ -975,15 +997,26 @@ function renderRaidBlock(raidName, diff, gates) {
 }
 
 function loadRaidRewards() {
-    try {
-        // 사양서에 정의된 FileStream API 사용 (상단에 RAID_REWARD_FILE 경로 정의 필요)
-        var path = "/sdcard/Sybot/data/raid_rewards.json";
-        if (typeof RAID_REWARD_FILE !== 'undefined') path = RAID_REWARD_FILE;
+    // 1. 캐시가 존재하면 즉시 반환 (성능 최적화)
+    if (_raidRewardCache) return _raidRewardCache;
 
-        return FileStream.readJson(path);
-    } catch (e) {
+    // 2. 파일 경로 설정
+    const path = (typeof RAID_REWARD_FILE !== 'undefined')
+        ? RAID_REWARD_FILE
+        : "/sdcard/Sybot/data/raid_rewards.json";
+
+    // 3. 최신 내장 API를 사용하여 JSON 읽기 (try-catch 불필요)
+    const js = FileStream.readJson(path);
+
+    // 4. 데이터 유효성 검사 (파일이 없거나 JSON 형식이 안 맞으면 null 반환)
+    if (!js || !js.raids) {
+        Log.e("[RAID] Failed to load or invalid JSON format.");
         return null;
     }
+
+    // 5. 캐시에 저장 후 반환
+    _raidRewardCache = js;
+    return _raidRewardCache;
 }
 
 /**
@@ -1000,7 +1033,7 @@ const fetchSiblings = (characterName) => {
         conn.setRequestMethod("GET");
         conn.setConnectTimeout(5000);
         conn.setReadTimeout(5000);
-        conn.setRequestProperty("authorization", "bearer " + LOSTARK_API_KEY);
+        conn.setRequestProperty("authorization", "bearer " + config.LOSTARK_API_KEY);
         conn.setRequestProperty("accept", "application/json");
 
         const responseCode = conn.getResponseCode();
@@ -1054,7 +1087,7 @@ function fetchLatestPatchNote() {
     var url = LOSTARK_BASE + "/news/notices?searchText=" + encodeURIComponent("업데이트") + "&type=" + encodeURIComponent("공지");
 
     // httpGetUtf8 활용
-    var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+    var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
 
     if (!res.ok) {
         return { ok: false, reason: "HTTP_" + res.code };
@@ -1078,7 +1111,7 @@ function fetchGoldIslands() {
     Log.i("[쌀섬] fetchGoldIslands 함수 시작");
     var url = LOSTARK_BASE + "/gamecontents/calendar";
 
-    var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+    var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
 
     if (!res.ok) {
         Log.e("[쌀섬] HTTP 요청 실패: " + res.code);
@@ -1168,7 +1201,7 @@ function fetchWeeklyGold(charNameRaw) {
     var charName = String(charNameRaw).trim();
     var url = LOSTARK_BASE + "/characters/" + encodeURIComponent(charName) + "/siblings";
 
-    var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+    var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
     if (!res.ok) {
         if (res.code === 404) return { ok: false, reason: "NOT_FOUND" };
         return { ok: false, reason: "HTTP_" + res.code };
@@ -1291,7 +1324,7 @@ function fetchAccessories(charNameRaw) {
     var charName = String(charNameRaw);
     var url = LOSTARK_BASE + "/armories/characters/" + charName + "/equipment";
 
-    var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+    var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
     if (!res.ok) {
         if (res.code === 404) return { ok: false, reason: "NOT_FOUND" };
         return { ok: false, reason: "HTTP_" + res.code };
@@ -1443,6 +1476,9 @@ function getSynergyText(query) {
 }
 
 // 메시지 리스너
+init();
+
+bot.addListener(Event.START_COMPILE, init);
 bot.addListener(Event.MESSAGE, function (msg) {
     var room = msg.room || "";
     var content = (msg.content || "").trim();

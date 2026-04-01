@@ -18,13 +18,18 @@
 /* ==================== 전역 상수 및 Java 타입 설정 ==================== */
 
 const bot = BotManager.getCurrentBot();
+const CONFIG_PATH = "/sdcard/Sybot/config.json";
 const File = Java.type("java.io.File");
+
+const DICE_DEFAULT_CONFIG = {
+    ADMIN_HASH: "no_HASH",
+};
+
+/** @type {object} 외부 설정값을 담을 객체 */
+let config = {};
 
 /** @description 허용된 채팅방 목록 */
 const ALLOWED_ROOMS = ["아크라시아인의 휴식처"];
-
-/** @description 관리자 해시 목록 (본인의 해시를 여기에 추가하세요) */
-const ADMIN_HASHES = ["af25e2be2a646336ef12d1946faa6c266f170b75d3014f470b030b13a1c02096"];
 
 /** @description 명령어 접두사 */
 const PREFIX = ".";
@@ -57,6 +62,41 @@ function saveUserData(data) {
     } catch (e) {
         Log.e(`데이터 저장 실패: ${e.message}`);
     }
+}
+
+function loadConfig(filePath, defaultData) {
+    try {
+        if (!FileStream.exists(filePath)) {
+            FileStream.writeJson(filePath, defaultData);
+            Log.i("기본 설정 파일을 생성했습니다: " + filePath);
+            return defaultData;
+        }
+
+        let loadedData = FileStream.readJson(filePath);
+        let isUpdated = false;
+
+        for (let key in defaultData) {
+            if (loadedData[key] === undefined) {
+                loadedData[key] = defaultData[key];
+                isUpdated = true;
+            }
+        }
+
+        if (isUpdated) {
+            FileStream.writeJson(filePath, loadedData);
+            Log.i("설정 파일에 누락된 새 항목을 추가했습니다.");
+        }
+
+        return loadedData;
+    } catch (e) {
+        Log.e("설정 로드 중 오류 발생: " + e.message);
+        return defaultData;
+    }
+}
+
+function init() {
+    initFileSystem();
+    config = loadConfig(CONFIG_PATH, DICE_DEFAULT_CONFIG);
 }
 
 /* ==================== 유틸리티 함수 ==================== */
@@ -186,7 +226,7 @@ function onMessage(msg) {
                 // 관리자 명령어인지 체크
                 const isAdminCmd = ["지급", "주사위추가", "주사위초기화", "올인초기화"].includes(cmd);
 
-                if (isAdminCmd && !ADMIN_HASHES.includes(hash)) {
+                if (isAdminCmd && config.ADMIN_HASH !== hash) {
                     reply(`[🚫 권한 없음] 관리자만 사용 가능한 명령어입니다.`);
                     return;
                 }
@@ -435,5 +475,7 @@ function onMessage(msg) {
     }
 }
 
-bot.addListener(Event.START_COMPILE, () => { initFileSystem(); });
+init();
+
+bot.addListener(Event.START_COMPILE, init);
 bot.addListener(Event.MESSAGE, onMessage);

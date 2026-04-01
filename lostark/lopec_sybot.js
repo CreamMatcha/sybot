@@ -6,16 +6,59 @@ const { KakaoApiService, KakaoShareClient } = require('kakaolink');
 const Jsoup = Java.type("org.jsoup.Jsoup");
 const Thread = Java.type("java.lang.Thread");
 
-// API 키
-var LOSTARK_API_KEY = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6IktYMk40TkRDSTJ5NTA5NWpjTWk5TllqY2lyZyIsImtpZCI6IktYMk40TkRDSTJ5NTA5NWpjTWk5TllqY2lyZyJ9.eyJpc3MiOiJodHRwczovL2x1ZHkuZ2FtZS5vbnN0b3ZlLmNvbSIsImF1ZCI6Imh0dHBzOi8vbHVkeS5nYW1lLm9uc3RvdmUuY29tL3Jlc291cmNlcyIsImNsaWVudF9pZCI6IjEwMDAwMDAwMDAyNTQ2NjAifQ.E9LoI03kRumrluMGtS5G1XlIH0sRY7-xRWaa6G_-t_X5mhoeJqEsyz-aknmSFf8BbVX00S8Gl7TibmaQCwY5nbMARPLwfhJJ_kN3u1euaf0PWnr4hI-WnsSqt0fDfv5OWcXDaAaY21-lJwSSst9JhQbQlnvBB4dH9le0tl4ZSn_DWsvrHk972MSPJYZuHt3oggsnaD2_X8fDEjHpv3UDV1im7DWmCKUlSk-60I9al4OKxxOvaJCtAcz5rAOrEDj1XyrxaLwfvFF5jBVZiZygot6VjnuFdfyP0fmz2lKmzloXWekquDjL4mWLnubkSm5JkZvQbdS1vm2mVPu6_bFULA"; // 예) "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 var LOSTARK_BASE = "https://developer-lostark.game.onstove.com";
 
 // 카카오 디벨로퍼스 설정
-const SERVER_URL = "http://34.64.244.233:3101/search";
-const JS_KEY = "63ccd6c2bfe4e0b189d6d2eeeac77584";
 const DOMAIN = "https://google.com";
-const LOPEC_TEMPLATE_ID = 129396;
-const AVATAR_TEMPLATE_ID = 130733;
+
+// 파일 경로
+const CONFIG_PATH = "/sdcard/Sybot/config.json";
+
+/** @type {object} 전역 설정 객체 선언 (누락 방지) */
+let config = {};
+
+// [설정] config 관련 설정
+const MAIN_DEFAULT_CONFIG = {
+    JS_KEY: "no_URL",
+    LOSTARK_API_KEY: "no_API_KEY",
+    LOPEC_TEMPLATE_ID: "no_LOPEC_TEMPLATE_ID",
+    AVATAR_TEMPLATE_ID: "no_AVATAR_TEMPLATE_ID"
+};
+
+function loadConfig(filePath, defaultData) {
+    try {
+        if (!FileStream.exists(filePath)) {
+            FileStream.writeJson(filePath, defaultData);
+            Log.i("기본 설정 파일을 생성했습니다: " + filePath);
+            return defaultData;
+        }
+
+        let loadedData = FileStream.readJson(filePath);
+        let isUpdated = false;
+
+        for (let key in defaultData) {
+            if (loadedData[key] === undefined) {
+                loadedData[key] = defaultData[key];
+                isUpdated = true;
+            }
+        }
+
+        if (isUpdated) {
+            FileStream.writeJson(filePath, loadedData);
+            Log.i("설정 파일에 누락된 새 항목을 추가했습니다.");
+        }
+
+        return loadedData;
+    } catch (e) {
+        Log.e("설정 로드 중 오류 발생: " + e.message);
+        return defaultData;
+    }
+}
+
+function init() {
+    config = loadConfig(CONFIG_PATH, MAIN_DEFAULT_CONFIG);
+    Log.i("설정 로드 완료!");
+}
 
 
 // 서비스 및 클라이언트 초기화
@@ -74,6 +117,57 @@ function logCommand(msg, command, arg) {
     }
 }
 
+function handleApiError(msg, error, context, extraInfo) {
+    var errCode = error;
+    var errStack = "";
+
+    // 만약 error가 진짜 시스템 에러 객체(try-catch의 e)라면 분리
+    if (typeof error === 'object' && error !== null) {
+        errCode = error.message || "UNKNOWN";
+        errStack = error.stack || "";
+    }
+
+    // ----------------------------------------
+    // Case 1: 비즈니스 로직 에러 (사용자에게 친절하게 안내)
+    // ----------------------------------------
+    if (errCode === "NOT_FOUND") {
+        msg.reply("'" + (extraInfo || "캐릭터") + "'를 찾을 수 없어요.");
+        return; // 로그는 굳이 안 남기거나 Info로 남김
+    }
+
+    if (errCode === "HTTP_401" || errCode === "HTTP_403") {
+        msg.reply("인증 오류입니다. API 키를 확인해주세요.");
+        Log.e("[" + context + "] API Key Auth Error");
+        return;
+    }
+
+    if (errCode === "NO_FIELD" || errCode === "MAINTENANCE") {
+        msg.reply("정보를 가져올 수 없어요.");
+        return;
+    }
+
+    if (errCode === "NO_BRACELET") {
+        msg.reply("장착 중인 팔찌가 없거나 정보를 볼 수 없어요.");
+        return;
+    }
+
+    if (errCode === "NO_GEMS") {
+        msg.reply("해당 캐릭터는 보석을 착용하고 있지 않습니다.");
+        return;
+    }
+
+    if (errCode === "NO_BRACELET") {
+        msg.reply("해당 캐릭터는 팔찌를 착용하고 있지 않습니다.");
+        return;
+    }
+
+    // ----------------------------------------
+    // Case 2: 진짜 시스템 에러/예외 (개발자용 로그)
+    // ----------------------------------------
+    Log.e("[ERROR] " + context + " 실패\n방: " + msg.room + "\n코드: " + errCode + "\n" + errStack);
+    msg.reply("앗차차! 뭔가 잘못됐어요..");
+}
+
 /* ==================== [기능: 로그인 및 스케줄러] ==================== */
 
 /**
@@ -129,7 +223,7 @@ startScheduler();
 function fetchAvatarImage(charNameRaw) {
     var charName = String(charNameRaw);
     var url = LOSTARK_BASE + "/armories/characters/" + encodeURIComponent(charName) + "/profiles";
-    var res = httpGetUtf8(url, { "authorization": "bearer " + LOSTARK_API_KEY });
+    var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
 
     if (!res.ok) return { ok: false, reason: "HTTP_" + res.code };
 
@@ -191,7 +285,9 @@ function getTierFileName(tier) {
 }
 
 /* ==================== [이벤트 핸들러] ==================== */
+init();
 
+bot.addListener(Event.START_COMPILE, init);
 bot.addListener(Event.MESSAGE, (msg) => {
     const content = msg.content.trim();
 
@@ -317,9 +413,9 @@ bot.addListener(Event.MESSAGE, (msg) => {
                 // 캐릭터 이미지 설정 (우선 순위: 직업 이미지)
                 const charImg = classImgUrl;
                 // 카카오링크 전송
-                client.init(JS_KEY, DOMAIN, loginCookies);
+                client.init(config.JS_KEY, DOMAIN, loginCookies);
                 client.sendLink(msg.room, {
-                    templateId: LOPEC_TEMPLATE_ID,
+                    templateId: config.LOPEC_TEMPLATE_ID,
                     templateArgs: {
                         "name": name,
                         "className": className,
@@ -367,11 +463,11 @@ bot.addListener(Event.MESSAGE, (msg) => {
 
                 if (rAvatar && rAvatar.ok) {
                     // 카카오링크 클라이언트 초기화
-                    client.init(JS_KEY, DOMAIN, loginCookies);
+                    client.init(config.JS_KEY, DOMAIN, loginCookies);
 
                     // 카카오링크 전송
                     client.sendLink(msg.room, {
-                        templateId: AVATAR_TEMPLATE_ID,
+                        templateId: config.AVATAR_TEMPLATE_ID,
                         templateArgs: {
                             "name": charName,
                             "avatar_img": rAvatar.imageUrl // fetchAvatarImage에서 반환한 이미지 URL
