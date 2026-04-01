@@ -470,7 +470,10 @@ bot.addListener(Event.MESSAGE, (msg) => {
                         templateId: config.AVATAR_TEMPLATE_ID,
                         templateArgs: {
                             "name": charName,
-                            "avatar_img": rAvatar.imageUrl // fetchAvatarImage에서 반환한 이미지 URL
+                            "avatar_img": rAvatar.imageUrl, // 템플릿에 사진을 보여주기 위한 전체 URL (기존 유지)
+
+                            // 이동할 링크를 위해 'https://img.lostark.co.kr' 부분을 잘라낸 뒷부분만 전송
+                            "link_path": rAvatar.imageUrl.replace("https://img.lostark.co.kr", "")
                         }
                     }, 'custom').then(sendRes => {
                         Log.i("아바타 전송 성공");
