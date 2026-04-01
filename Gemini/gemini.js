@@ -73,7 +73,9 @@ function init() {
  * @return {string} Gemini의 답변 또는 에러 메시지
  */
 function askGemini(prompt) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${config.GEMINI_API_KEY}`;
+    Log.d("[Gemini API] 답변 생성 요청 시작..."); // 📝 작동 로그 추가
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${config.GEMINI_API_KEY}`;
 
     try {
         const requestBody = {
@@ -87,20 +89,23 @@ function askGemini(prompt) {
             .ignoreHttpErrors(true) // 🌟 에러 상세 메시지 확인용
             .header("Content-Type", "application/json")
             .requestBody(JSON.stringify(requestBody))
-            .timeout(0) // ⏱️ [추가] 타임아웃 60초 설정
+            .timeout(0) // ⏱️ 타임아웃 무제한 설정
             .post();
 
         const jsonRes = JSON.parse(response.body().text());
 
         if (jsonRes.candidates && jsonRes.candidates.length > 0) {
+            Log.d("[Gemini API] 답변 생성 완료 성공!"); // 📝 작동 로그 추가
             return jsonRes.candidates[0].content.parts[0].text.trim();
         } else if (jsonRes.error) {
+            Log.e("[Gemini API] 서버 에러: " + jsonRes.error.message); // 📝 에러 로그 보강
             return `[API 에러] ${jsonRes.error.message}`;
         } else {
+            Log.w("[Gemini API] 예상치 못한 응답 포맷 (답변 없음)"); // 📝 경고 로그 추가
             return "제미나이가 답변을 생성하지 못했습니다.";
         }
     } catch (e) {
-        Log.e(`${e.name}\n${e.message}\n${e.stack}`);
+        Log.e(`[Gemini API] 호출 실패:\n${e.name}\n${e.message}\n${e.stack}`);
         return "API 호출 중 오류가 발생했습니다. (타임아웃 또는 연결 오류)";
     }
 }
@@ -109,6 +114,8 @@ function askGemini(prompt) {
  * @description 현재 API 키로 사용 가능한 Gemini 모델 목록 확인
  */
 function getAvailableModels() {
+    Log.d("[Gemini API] 모델 목록 조회 요청 시작..."); // 📝 작동 로그 추가
+
     try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${config.GEMINI_API_KEY}`;
 
@@ -116,12 +123,13 @@ function getAvailableModels() {
         const response = Jsoup.connect(url)
             .ignoreContentType(true)
             .ignoreHttpErrors(true)
-            .timeout(30000) // ⏱️ [추가] 타임아웃 30초 설정
+            .timeout(30000) // ⏱️ 타임아웃 30초 설정
             .get();
 
         const jsonRes = JSON.parse(response.body().text());
 
         if (jsonRes.models) {
+            Log.d("[Gemini API] 모델 목록 조회 완료 성공!"); // 📝 작동 로그 추가
             // 모델들의 'name' 속성만 추출해서 줄바꿈으로 연결
             const modelNames = jsonRes.models
                 .filter(m => m.supportedGenerationMethods.includes("generateContent")) // 텍스트 생성 지원 모델만 필터링
@@ -129,10 +137,14 @@ function getAvailableModels() {
                 .join("\n");
             return "✅ [사용 가능한 모델 목록]\n" + modelNames;
         } else if (jsonRes.error) {
+            Log.e("[Gemini API] 모델 조회 서버 에러: " + jsonRes.error.message); // 📝 에러 로그 보강
             return `[API 에러] ${jsonRes.error.message}`;
         }
+
+        Log.w("[Gemini API] 모델 목록 조회 실패 - 알 수 없는 응답"); // 📝 경고 로그 추가
         return "목록을 불러오지 못했습니다.";
     } catch (e) {
+        Log.e("[Gemini API] 모델 조회 중 예외 발생: " + e.message); // 📝 에러 로그 보강
         return `오류 발생: ${e.message}`;
     }
 }
@@ -152,13 +164,16 @@ function onCommand(cmd) {
             return;
         }
 
-        // 🧵 [추가] 메인 스레드 멈춤 방지를 위한 비동기 처리
+        Log.i(`[명령어 실행] '.제미나이' 호출됨 (질문: ${question})`); // 📝 작동 로그 추가
+
+        // 🧵 메인 스레드 멈춤 방지를 위한 비동기 처리
         new Thread(() => {
             try {
                 const answer = askGemini(question);
                 cmd.reply(answer);
+                Log.i(`[명령어 완료] '.제미나이' 답변 전송 성공`); // 📝 작동 로그 추가
             } catch (e) {
-                Log.e(`${e.name}\n${e.message}\n${e.stack}`);
+                Log.e(`[명령어 에러] '.제미나이' 처리 중 오류:\n${e.name}\n${e.message}\n${e.stack}`);
                 cmd.reply("처리 중 내부 오류가 발생했습니다.");
             }
         }).start();
@@ -167,10 +182,13 @@ function onCommand(cmd) {
     }
 
     if (cmd.command === "모델확인") {
-        // 🧵 [추가] 네트워크 요청이 포함되어 있으므로 비동기로 처리
+        Log.i(`[명령어 실행] '.모델확인' 호출됨`); // 📝 작동 로그 추가
+
+        // 🧵 네트워크 요청이 포함되어 있으므로 비동기로 처리
         new Thread(() => {
             const list = getAvailableModels();
             cmd.reply(list);
+            Log.i(`[명령어 완료] '.모델확인' 전송 성공`); // 📝 작동 로그 추가
         }).start();
 
         return;
