@@ -701,16 +701,6 @@ function extractFirstPercentFromText(text) {
     return normalizePercentText(m[1]) + "%";
 }
 
-function extractBasicAtkIncreaseFromOption(optionText) {
-    var plain = stripHtml(String(optionText || ""));
-    // 예: "기본 공격력 1.00% 증가"
-    var m = plain.match(/기본\s*공격력\s*([0-9]+(?:\.[0-9]+)?)\s*%/);
-    if (!m) return 0;
-    // float 파싱
-    var v = parseFloat(m[1]);
-    return isNaN(v) ? 0 : v;
-}
-
 // 직업명 3글자 이하 매핑
 var CLASS_SHORT = {
     "디스트로이어": "디트",
@@ -764,40 +754,12 @@ const formatClassCompact = (className) => {
     return shortName.length > 3 ? shortName.substring(0, 3) : shortName;
 };
 
-// Skills[].Description/Option/Tooltip 등에서 판정에 쓸 텍스트를 합쳐서 반환
-function collectGemEffectText(skillObj) {
-    if (!skillObj) return "";
-    var parts = [];
-
-    if (skillObj.Description && skillObj.Description.length) {
-        for (var i = 0; i < skillObj.Description.length; i++) parts.push(String(skillObj.Description[i]));
-    }
-    if (skillObj.Option) parts.push(String(skillObj.Option));
-    if (skillObj.Tooltip) parts.push(String(skillObj.Tooltip));
-
-    return stripHtml(parts.join(" "));
-}
-
-// 광휘를 작/겁으로 분류: "피해 n% 증가" => 겁, "재사용 대기시간 n% 감소" => 작
-function classifyGlowAsJakOrGeop(skillObj) {
-    if (!skillObj) return null;
-    var descText = "";
-    if (Array.isArray(skillObj.Description)) {
-        descText = skillObj.Description.join(" ");
-    } else if (skillObj.Description) {
-        descText = String(skillObj.Description);
-    }
-    var t = (descText + " " + (skillObj.Option || "") + " " + (skillObj.Tooltip || "")).replace(/<[^>]*>/g, "");
-    if (t.indexOf("피해") !== -1 && t.indexOf("증가") !== -1) return "겁";
-    if (t.indexOf("재사용") !== -1 && t.indexOf("대기시간") !== -1 && t.indexOf("감소") !== -1) return "작";
-    return null;
-}
 
 function renderGemsView(model) {
     // model: { name, ClassName, Gems:[], Effects:{} }
     var cls = formatClassCompact(model.ClassName || "미확인");
 
-    // Effects.Skills를 GemSlot으로 맵핑
+    // 1. Effects.Skills를 GemSlot 기준으로 맵핑 (Gems.Slot과 연결)
     var skillBySlot = {};
     var skills = (model.Effects && model.Effects.Skills) ? model.Effects.Skills : [];
     for (var i = 0; i < skills.length; i++) {
@@ -809,63 +771,72 @@ function renderGemsView(model) {
     var cntJak = 0, cntGeop = 0;
     var sumLv = 0;
 
-    // 기본 공격력 증가 합(Option들 합산)
-    var sumBasicAtk = 0;
-    for (var j = 0; j < skills.length; j++) {
-        sumBasicAtk += extractBasicAtkIncreaseFromOption(skills[j] && skills[j].Option);
+    // 2. 기본 공격력 총합 추출 (Effects.Description 참조)
+    // 예: "<FONT COLOR='#B7FB00'>기본 공격력 총합 : 6.80%</FONT>" -> "6.80%"
+    var sumBasicAtkText = "0.00%";
+    if (model.Effects && model.Effects.Description) {
+        var cleanDesc = stripHtml(model.Effects.Description);
+        var matchAtk = cleanDesc.match(/([0-9]+(?:\.[0-9]+)?)\s*%/);
+        if (matchAtk) sumBasicAtkText = matchAtk[1] + "%";
     }
 
-    // 라인 구성용 배열
     var rows = [];
 
+    // 3. 각 보석(Gems) 데이터 순회 및 조립
     for (var g = 0; g < model.Gems.length; g++) {
         var gem = model.Gems[g] || {};
         var slot = gem.Slot;
+
+        // 보석 레벨 추출 (Gems.Level 참조)
         var lv = (gem.Level != null) ? parseInt(gem.Level, 10) : 0;
         if (isNaN(lv)) lv = 0;
         sumLv += lv;
 
+        // 보석 이름에서 기본 타입 추출 ('겁', '작', '광')
         var typeShort = getGemTypeShortFromName(gem.Name);
-
-        // 스킬 매칭 먼저
         var sk = skillBySlot[String(slot)] || null;
 
-        // 카운트 규칙:
-        // - 작열/겁화는 그대로 카운트
-        // - 광휘는 텍스트 판정으로 작/겁에 포함
-        if (typeShort === "작") {
-            cntJak++;
-        } else if (typeShort === "겁") {
-            cntGeop++;
-        } else if (typeShort === "광") {
-            var asType = classifyGlowAsJakOrGeop(sk);
-            if (asType === "작") cntJak++;
-            else if (asType === "겁") cntGeop++;
-            // 판정 실패면 전체만 늘고 작/겁에는 미포함(그래도 라인은 7광으로 표기됨)
-        }
-
+        // 스킬 이름 추출 (Effects.Skills[i].Name 참조)
         var skillName = sk && sk.Name ? String(sk.Name) : "알 수 없음";
 
-        // 퍼센트는 Description(배열)에서 첫 % 추출
-        var pct = null;
-        if (sk && sk.Description && sk.Description.length) {
-            pct = extractFirstPercentFromText(sk.Description[0]);
-        } else if (sk && sk.Tooltip) {
-            pct = extractFirstPercentFromText(sk.Tooltip);
-        }
-        if (!pct) pct = "";
+        var displayType = typeShort;
+        var pctText = "";
 
-        // 예: [바　드] 10겁 | 천상의 연주(44%)
-        var line = "[" + cls + "] " + lv + typeShort + " | " + skillName + (pct ? ("(" + pct + ")") : "");
+        // 4. Effects.Skills[i].Description 데이터로 겁/작 및 퍼센트 확실히 판별
+        if (sk && sk.Description && sk.Description.length > 0) {
+            // 예: "피해 32.00% 증가" 또는 "재사용 대기시간 18.00% 감소"
+            var targetDesc = String(sk.Description[0]);
+
+            // 광휘 보석일 경우 명확하게 '감소'/'증가' 단어로 재분류
+            if (typeShort === "광") {
+                if (targetDesc.indexOf("감소") !== -1) {
+                    displayType = "작";
+                } else if (targetDesc.indexOf("증가") !== -1) {
+                    displayType = "겁";
+                }
+            }
+
+            // 퍼센트 수치만 추출
+            var pctMatch = targetDesc.match(/([0-9]+(?:\.[0-9]+)?)\s*%/);
+            if (pctMatch) {
+                pctText = normalizePercentText(pctMatch[1]) + "%";
+            }
+        }
+
+        // 카운트 누적
+        if (displayType === "작") cntJak++;
+        else if (displayType === "겁") cntGeop++;
+
+        // 요약 라인 생성 (예: [건  슬] 7작 | 절멸의 탄환(18%))
+        var line = "[" + cls + "] " + lv + displayType + " | " + skillName + (pctText ? ("(" + pctText + ")") : "");
         rows.push({
             lv: lv,
-            type: typeShort,
+            type: displayType,
             line: line
         });
     }
 
-    // 정렬: 레벨 내림차순 → 작/겁 순(예시처럼 9작이 9겁보다 먼저 오게)
-    function typeOrder(t) { return (t === "작") ? 0 : (t === "겁" ? 1 : 9); }
+    // 5. 정렬: 레벨 내림차순 -> 작/겁 순
     rows.sort(function (a, b) {
         if (b.lv !== a.lv) return b.lv - a.lv;
         var p = { "작": 1, "겁": 2, "광": 3, "?": 4 };
@@ -876,16 +847,13 @@ function renderGemsView(model) {
     });
 
     var avgLv = total ? (sumLv / total) : 0;
-    // 평균 레벨 1자리
     var avgLvText = (Math.round(avgLv * 10) / 10).toFixed(1);
 
-    // 기본 공격력 증가: 2자리
-    var basicAtkText = (Math.round(sumBasicAtk * 100) / 100).toFixed(2) + "%";
-
+    // 6. 텍스트 조합
     var out = [];
     out.push("◦ " + model.name + " 의 보석 정보");
     out.push("작(" + cntJak + ") 겁(" + cntGeop + "), 평균 " + avgLvText + "lv");
-    out.push("기본 공격력 증가:  " + basicAtkText);
+    out.push("기본 공격력 증가:  " + sumBasicAtkText);
     out.push("━━━━━━━━━━━━━━");
     for (var k = 0; k < rows.length; k++) out.push(rows[k].line);
 
@@ -932,13 +900,6 @@ function readTextUtf8(path) {
 
 function _normKey(s) {
     return String(s || "").replace(/\s+/g, "").toLowerCase();
-}
-
-function formatGold(x) {
-    // sybot_LostArk.js에 이미 formatThousandsSafe가 있으니 그걸 쓰는 게 베스트
-    // 없으면 아래 한 줄로 대체 가능:
-    // return String(Math.round(Number(x) || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-    return formatThousandsSafe(Math.round(Number(x) || 0));
 }
 
 function mergeItems(dstMap, items) {
@@ -1184,13 +1145,15 @@ function calculateGoldForLevel(levelStr) {
     var level = parseFloat(String(levelStr).replace(/,/g, ""));
     if (isNaN(level)) return 0;
 
+    if (level >= 1750) return 156000;
     if (level >= 1740) return 148000;
     if (level >= 1730) return 138000;
-    if (level >= 1720) return 117000;
+    if (level >= 1720) return 122000;
     if (level >= 1710) return 108000;
-    if (level >= 1700) return 83000;
+    if (level >= 1700) return 90000;
     if (level >= 1690) return 62000;
     if (level >= 1680) return 55500;
+    if (level >= 1670) return 35200
     return 0;
 }
 
