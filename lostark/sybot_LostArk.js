@@ -1446,7 +1446,7 @@ var SYNERGY_DATA = [
     { category: "헌터 (아르데타인)", content: "데헌: 치적 10\n호크: 피증 6, 이속 4(두동)\n블래: 방감 12\n스카: 공증 6건슬: 치적 10\n" },
     { category: "마법사 (실린)", content: "서머너: 방감 12, 마나회복 40 (트포 선택)\n알카: 치적 10\n소서: 피증 6" },
     { category: "암살자 (데런)", content: "데모닉: 피증 6\n리퍼: 방감 12\n소울: 피증 6\n블레: 피증 4, 백헤드 5, 공속 25, 이속 20" },
-    { category: "스페셜리스트 (요즈)", content: "기상(질풍): 치적 10, 공이속 12\n기상(이슬비): 치적 10, 공감 10\n환수사: 방감 12" }, ,
+    { category: "스페셜리스트 (요즈)", content: "기상(질풍): 치적 10, 공이속 12\n기상(이슬비): 치적 10, 공감 10\n환수사: 방감 12" },
     { category: "가디언나이트 (가나)", content: "가디언나이트: 피증 6" },
     { category: "딜서폿", content: "바드: 방감 12\n도화가: 방감 12\n홀나: 치명타 시 적주피 8" }
 ];
@@ -1875,6 +1875,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
     // .시너지, .ㅅㄴㅈ, ㅅㄴㅈ 와 매칭되며 뒤에 검색어가 올 수 있음
     var mSynergy = content.match(/^(?:\.시너지|\.?ㅅㄴㅈ)(?:\s+(.+))?$/);
     if (mSynergy) {
+        logCommand(msg, "시너지 조회", mSynergy[1] || "");
         var synergyQuery = mSynergy[1] || "";
         logCommand(msg, "시너지 조회", synergyQuery);
 
@@ -1883,6 +1884,30 @@ bot.addListener(Event.MESSAGE, function (msg) {
             msg.reply(synergyResult);
         } catch (e) {
             handleApiError(msg, e, "시너지 조회");
+        }
+        return;
+    }
+
+    const matchAuction = content.match(/^(?:\.ㄱㅁ|\.경매|ㄱㅁ|\.ㅂㅂㄱ|ㅂㅂㄱ)\s+([0-9,]+)$/);
+    if (matchAuction) {
+        // 숫자 콤마(,) 제거 후 정수 변환
+        logCommand(msg, "경매 분배금 계산", matchAuction[1]);
+
+        const price = parseInt(matchAuction[1].replace(/,/g, ''), 10);
+
+        if (price > 0) {
+            const realValue = price * 0.95;
+
+            const rec4 = Math.ceil(Math.floor(realValue * 3 / 4) / 1.1);
+            const rec8 = Math.ceil(Math.floor(realValue * 7 / 8) / 1.1);
+
+            const replyMsg = "경매 입찰 추천가\n" +
+                rec4.toLocaleString() + " 골(4인)\n" +
+                rec8.toLocaleString() + " 골(8인)";
+
+            msg.reply(replyMsg);
+        } else {
+            msg.reply("올바른 금액을 입력해주세요. (예: .경매 10000)");
         }
         return;
     }
