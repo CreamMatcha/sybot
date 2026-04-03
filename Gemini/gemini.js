@@ -30,17 +30,55 @@ const MAIN_DEFAULT_CONFIG = {
 /**
  * @description 설정 파일을 불러오거나 생성합니다.
  */
+
+/**
+ * @description JSON 파일을 읽어 순수 JS 객체로 파싱합니다. (Interop 프록시 객체 생성 방지)
+ * @param {string} path 파일 경로
+ * @return {object|null} 파싱된 객체 또는 실패/파일 없음 시 null 반환
+ */
+function safeReadJson(path) {
+    try {
+        if (!FileStream.exists(path)) return null;
+        const raw = FileStream.read(path);
+        // 빈 문자열이거나 null일 경우 방지
+        if (!raw || raw.trim() === "") return null;
+        return JSON.parse(String(raw));
+    } catch (e) {
+        Log.e(`[safeReadJson] 파일 읽기 실패 (${path}): ${e.message}`);
+        return null;
+    }
+}
+
+/**
+ * @description 순수 JS 객체를 JSON 문자열로 변환하여 파일에 저장합니다.
+ * @param {string} path 파일 경로
+ * @param {object} data 저장할 데이터 객체
+ */
+function safeWriteJson(path, data) {
+    try {
+        FileStream.write(path, JSON.stringify(data, null, 2));
+    } catch (e) {
+        Log.e(`[safeWriteJson] 파일 저장 실패 (${path}): ${e.message}`);
+    }
+}
+/**
+ * @description 설정 파일을 안전하게 불러오고, 파일이 없거나 누락된 설정이 있으면 기본값으로 채운 뒤 저장합니다.
+ * @param {string} filePath 설정 파일 경로
+ * @param {object} defaultData 기본 설정 객체
+ * @return {object} 완성된 설정 객체
+ */
 function loadConfig(filePath, defaultData) {
     try {
-        if (!FileStream.exists(filePath)) {
-            FileStream.writeJson(filePath, defaultData);
-            Log.i("기본 설정 파일을 생성했습니다: " + filePath);
+        let loadedData = safeReadJson(filePath);
+
+        // 1. 파일이 없거나 읽기 실패한 경우 (기본값으로 새로 파일 생성)
+        if (!loadedData) {
+            safeWriteJson(filePath, defaultData);
             return defaultData;
         }
 
-        let loadedData = FileStream.readJson(filePath);
+        // 2. 파일은 있지만 새로운 설정 항목(키)이 추가되었을 경우 병합(Merge)
         let isUpdated = false;
-
         for (let key in defaultData) {
             if (loadedData[key] === undefined) {
                 loadedData[key] = defaultData[key];
@@ -48,17 +86,19 @@ function loadConfig(filePath, defaultData) {
             }
         }
 
+        // 3. 업데이트 사항이 있다면 다시 저장
         if (isUpdated) {
-            FileStream.writeJson(filePath, loadedData);
-            Log.i("설정 파일에 누락된 새 항목을 추가했습니다.");
+            safeWriteJson(filePath, loadedData);
         }
 
         return loadedData;
     } catch (e) {
-        Log.e("설정 로드 중 오류 발생: " + e.message);
+        Log.e(`[loadConfig] 설정 로드 중 오류: ${e.message}`);
+        // 최악의 오류 발생 시 봇이 멈추지 않도록 기본값 임시 반환
         return defaultData;
     }
 }
+
 
 function init() {
     config = loadConfig(CONFIG_PATH, MAIN_DEFAULT_CONFIG);
@@ -98,10 +138,10 @@ function askGemini(prompt) {
             Log.d("[Gemini API] 답변 생성 완료 성공!"); // 📝 작동 로그 추가
             return jsonRes.candidates[0].content.parts[0].text.trim();
         } else if (jsonRes.error) {
-            Log.e("[Gemini API] 서버 에러: " + jsonRes.error.message); // 📝 에러 로그 보강
+            Log.e("[Gemini API] 서버 에러: " + jsonRes.error.message);
             return `[API 에러] ${jsonRes.error.message}`;
         } else {
-            Log.w("[Gemini API] 예상치 못한 응답 포맷 (답변 없음)"); // 📝 경고 로그 추가
+            Log.w("[Gemini API] 예상치 못한 응답 포맷 (답변 없음)");
             return "제미나이가 답변을 생성하지 못했습니다.";
         }
     } catch (e) {
@@ -164,12 +204,16 @@ function onCommand(cmd) {
             return;
         }
 
-        Log.i(`[명령어 실행] '.제미나이' 호출됨 (질문: ${question})`); // 📝 작동 로그 추가
+        Log.i(`[명령어 실행] '.제미나이' 호출됨 (질문: ${question})`);
+
+        // ✅ 추가 수정: question 역시 스레드 진입 전 순수 문자열로 강제 변환하여 컨텍스트 분리!
+        const safeQuestion = String(question);
 
         // 🧵 메인 스레드 멈춤 방지를 위한 비동기 처리
         new Thread(() => {
             try {
-                const answer = askGemini(question);
+                // 기존의 question 대신 safeQuestion 사용
+                const answer = askGemini(safeQuestion);
                 cmd.reply(answer);
                 Log.i(`[명령어 완료] '.제미나이' 답변 전송 성공`); // 📝 작동 로그 추가
             } catch (e) {

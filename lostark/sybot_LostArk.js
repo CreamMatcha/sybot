@@ -37,23 +37,60 @@ let _raidRewardCache = null;
 let config = {};
 
 // [설정] config 관련 설정
-const MAIN_DEFAULT_CONFIG = {
+const LOSTARK_DEFAULT_CONFIG = {
     ADMIN_HASH: "no_HASH",
     WEBHOOK_URL: "no_URL",
     LOSTARK_API_KEY: "no_API_KEY"
 };
 
+/**
+ * @description JSON 파일을 읽어 순수 JS 객체로 파싱합니다. (Interop 프록시 객체 생성 방지)
+ * @param {string} path 파일 경로
+ * @return {object|null} 파싱된 객체 또는 실패/파일 없음 시 null 반환
+ */
+function safeReadJson(path) {
+    try {
+        if (!FileStream.exists(path)) return null;
+        const raw = FileStream.read(path);
+        // 빈 문자열이거나 null일 경우 방지
+        if (!raw || raw.trim() === "") return null;
+        return JSON.parse(String(raw));
+    } catch (e) {
+        Log.e(`[safeReadJson] 파일 읽기 실패 (${path}): ${e.message}`);
+        return null;
+    }
+}
+
+/**
+ * @description 순수 JS 객체를 JSON 문자열로 변환하여 파일에 저장합니다.
+ * @param {string} path 파일 경로
+ * @param {object} data 저장할 데이터 객체
+ */
+function safeWriteJson(path, data) {
+    try {
+        FileStream.write(path, JSON.stringify(data, null, 2));
+    } catch (e) {
+        Log.e(`[safeWriteJson] 파일 저장 실패 (${path}): ${e.message}`);
+    }
+}
+/**
+ * @description 설정 파일을 안전하게 불러오고, 파일이 없거나 누락된 설정이 있으면 기본값으로 채운 뒤 저장합니다.
+ * @param {string} filePath 설정 파일 경로
+ * @param {object} defaultData 기본 설정 객체
+ * @return {object} 완성된 설정 객체
+ */
 function loadConfig(filePath, defaultData) {
     try {
-        if (!FileStream.exists(filePath)) {
-            FileStream.writeJson(filePath, defaultData);
-            Log.i("기본 설정 파일을 생성했습니다: " + filePath);
+        let loadedData = safeReadJson(filePath);
+
+        // 1. 파일이 없거나 읽기 실패한 경우 (기본값으로 새로 파일 생성)
+        if (!loadedData) {
+            safeWriteJson(filePath, defaultData);
             return defaultData;
         }
 
-        let loadedData = FileStream.readJson(filePath);
+        // 2. 파일은 있지만 새로운 설정 항목(키)이 추가되었을 경우 병합(Merge)
         let isUpdated = false;
-
         for (let key in defaultData) {
             if (loadedData[key] === undefined) {
                 loadedData[key] = defaultData[key];
@@ -61,20 +98,22 @@ function loadConfig(filePath, defaultData) {
             }
         }
 
+        // 3. 업데이트 사항이 있다면 다시 저장
         if (isUpdated) {
-            FileStream.writeJson(filePath, loadedData);
-            Log.i("설정 파일에 누락된 새 항목을 추가했습니다.");
+            safeWriteJson(filePath, loadedData);
         }
 
         return loadedData;
     } catch (e) {
-        Log.e("설정 로드 중 오류 발생: " + e.message);
+        Log.e(`[loadConfig] 설정 로드 중 오류: ${e.message}`);
+        // 최악의 오류 발생 시 봇이 멈추지 않도록 기본값 임시 반환
         return defaultData;
     }
 }
 
+
 function init() {
-    config = loadConfig(CONFIG_PATH, MAIN_DEFAULT_CONFIG);
+    config = loadConfig(CONFIG_PATH, LOSTARK_DEFAULT_CONFIG);
     Log.i("설정 로드 완료!");
 }
 
@@ -244,7 +283,7 @@ function fetchCombatPower(charNameRaw) {
     // 요청 시작 로그
     Log.i("[LOA] fetchCombatPower START char=" + charName + " url=" + url);
 
-    var res = httpGetUtf8(url, { "authorization": "bearer " + config.config.LOSTARK_API_KEY });
+    var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
     var dt = java.lang.System.currentTimeMillis() - t0;
 
     if (!res.ok) {
