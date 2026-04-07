@@ -1625,6 +1625,10 @@ bot.addListener(Event.MESSAGE, function (msg) {
     if (mGEM) {
         var charGem = mGEM[1];
 
+        if (/^\d+[겁작]?$/.test(charGem)) {
+            return;
+        }
+
         logCommand(msg, "보석 조회", charGem);
 
         try {
