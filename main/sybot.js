@@ -10,6 +10,9 @@ const FOOD_FILE_PATH = SD_ROOT + "/Sybot/foodList.json";
 /** @type {object} 전역 설정 객체 선언 (누락 방지) */
 let config = {};
 
+/** @type {object} 방별 뽑기 세션 상태 관리 */
+const drawSessions = {};
+
 // [설정] config 관련 설정
 const MAIN_DEFAULT_CONFIG = {
     ADMIN_HASH: "no_HASH",
@@ -226,6 +229,92 @@ bot.addListener(Event.MESSAGE, function (msg) {
             handleError(msg, e, "건의사항 웹훅 전송");
             msg.reply("전송에 실패했어요. \n@chococo_7로 dm주세요.");
         }
+        return;
+    }
+
+    // ---------------------------------------------------------
+    // 미니게임: 뽑기 (럭키 드로우)
+    // ---------------------------------------------------------
+    const hash = msg.author.hash;
+    const name = msg.author.name;
+
+    if (content === ".뽑기시작") {
+        logCommand(msg, "뽑기 시작", "");
+
+        if (drawSessions[msg.room]) {
+            msg.reply("⚠️ 이미 진행 중인 뽑기가 있습니다. '.뽑기끝' 또는 '.뽑기취소'를 먼저 해주세요.");
+            return;
+        }
+
+        // 세션 생성: 시작한 사람의 해시를 호스트로 지정하고, 자동으로 참여 목록에 추가
+        drawSessions[msg.room] = {
+            hostHash: hash,
+            participants: {}
+        };
+        drawSessions[msg.room].participants[hash] = name;
+
+        msg.reply("🎉 뽑기가 시작되었습니다!\n\n참여하시려면 '.뽑기'를 입력해주세요.\n(시작한 사람은 자동으로 참여됩니다.)\n\n종료하려면 '.뽑기끝'을 입력해주세요.");
+        return;
+    }
+
+    if (content === ".뽑기") {
+        if (!drawSessions[msg.room]) {
+            msg.reply("⚠️ 진행 중인 뽑기가 없습니다. '.뽑기시작'으로 먼저 열어주세요.");
+            return;
+        }
+
+        if (drawSessions[msg.room].participants[hash]) {
+            msg.reply("❗ " + name + "님은 이미 참여하셨습니다!");
+            return;
+        }
+
+        drawSessions[msg.room].participants[hash] = name;
+        const currentCount = Object.keys(drawSessions[msg.room].participants).length;
+        msg.reply("✅ " + name + "님 참여 완료!\n(현재 참여자: " + currentCount + "명)");
+        return;
+    }
+
+    if (content === ".뽑기취소") {
+        if (!drawSessions[msg.room]) return;
+        if (drawSessions[msg.room].hostHash !== hash) {
+            msg.reply("⚠️ 뽑기 취소는 시작한 사람만 할 수 있습니다!");
+            return;
+        }
+
+        delete drawSessions[msg.room];
+        msg.reply("🗑️ 진행 중이던 뽑기가 취소되었습니다.");
+        return;
+    }
+
+    if (content === ".뽑기끝") {
+        logCommand(msg, "뽑기 종료", "");
+
+        if (!drawSessions[msg.room]) {
+            msg.reply("⚠️ 진행 중인 뽑기가 없습니다.");
+            return;
+        }
+
+        if (drawSessions[msg.room].hostHash !== hash) {
+            msg.reply("⚠️ 뽑기 결과 발표는 시작한 사람만 할 수 있습니다!");
+            return;
+        }
+
+        const players = Object.values(drawSessions[msg.room].participants);
+
+        if (players.length === 0) { // 혹시 모를 예외 처리
+            delete drawSessions[msg.room];
+            msg.reply("참여자가 없어 뽑기가 종료되었습니다.");
+            return;
+        }
+
+        // 랜덤 당첨자 추첨
+        const winnerIndex = Math.floor(Math.random() * players.length);
+        const winner = players[winnerIndex];
+
+        msg.reply("🎊 뽑기 결과 발표 🎊\n\n총 " + players.length + "명 참여\n당첨자: 👑 " + winner + " 님! 축하합니다! 🎉");
+
+        // 세션 초기화
+        delete drawSessions[msg.room];
         return;
     }
 });
