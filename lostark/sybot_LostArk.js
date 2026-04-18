@@ -1915,6 +1915,47 @@ bot.addListener(Event.MESSAGE, function (msg) {
         }
         return;
     }
+
+    // 가토 로테이션 조회
+    const matchGato = content.match(/^(?:\.가토|\.ㄱㅌ|ㄱㅌ)$/);
+    if (matchGato) {
+        logCommand(msg, "가토 로테이션 조회", "");
+
+        // 가토 로테이션 순서 배열
+        const guardianRotation = [
+            "루멘칼리고(암구)", // 0
+            "가르가디스(토구)", // 1
+            "스콜라키아(토구)", // 2
+            "크라티오스(뇌구)", // 3
+            "아게오로스(세구)", // 4
+            "드렉탈라스(화구)", // 5
+            "소나벨(암구)",     // 6
+            "베스칼(화구)"      // 7
+        ];
+
+        // 기준일: 2026년 4월 15일 수요일 오전 6시 (소나벨 주간)
+        const anchorDate = new Date("2026-04-15T06:00:00+09:00").getTime();
+        const now = new Date().getTime();
+
+        // 기준일로부터 경과한 주(Week) 수 계산
+        const msPerWeek = 7 * 24 * 60 * 60 * 1000;
+        const diffWeeks = Math.floor((now - anchorDate) / msPerWeek);
+
+        // 현재 주차의 가디언 인덱스 (소나벨 인덱스 6 기준)
+        const currentIndex = (((6 + diffWeeks) % 8) + 8) % 8;
+        const targetGuardian = guardianRotation[currentIndex];
+
+        // 다음 주차의 가디언 인덱스 계산 (현재 인덱스 + 1)
+        const nextIndex = (currentIndex + 1) % 8;
+        const nextGuardian = guardianRotation[nextIndex];
+
+        // 출력 형식 업데이트
+        const resultMsg = "✅ 이번주 ➜ " + targetGuardian +
+            "\n⏳ 다음주 ➜ " + nextGuardian;
+
+        msg.reply(resultMsg);
+        return;
+    }
 });
 
 
