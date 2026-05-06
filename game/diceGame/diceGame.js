@@ -373,7 +373,7 @@ function onMessage(msg) {
 
             case "포인트":
             case "지갑": {
-                reply(`[🏦 ${name}님의 지갑]\n보유 포인트: ${user.points.toLocaleString()}P\n누적 플레이: ${user.playCount}회`);
+                reply(`[🏦 ${name}님의 지갑]\n보유 포인트: ${user.points.toLocaleString()}P\n누적 플레이: ${user.playCount}회\n올인 크리티컬 실패: ${user.allInCritFails}/3회`);
                 break;
             }
 
