@@ -629,6 +629,7 @@ function fetchProfileClassName(charNameRaw) {
     }
 }
 
+
 // GET /armories/characters/{charName}/arkgrid
 function fetchArkGrid(charNameRaw) {
     var charName = String(charNameRaw);
@@ -1956,6 +1957,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
         msg.reply(resultMsg);
         return;
     }
+
 });
 
 
