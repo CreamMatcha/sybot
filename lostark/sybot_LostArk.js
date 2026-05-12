@@ -629,6 +629,150 @@ function fetchProfileClassName(charNameRaw) {
     }
 }
 
+
+// ==========================================
+// 캐릭터 통합 정보 조회 (.ㅈㅂ)
+// ==========================================
+function fetchIntegratedInfo(charNameRaw) {
+    var charName = String(charNameRaw);
+    var url = LOSTARK_BASE + "/armories/characters/" + charName + "?filters=profiles+engravings+cards+gems+arkpassive+arkgrid";
+
+    var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
+    if (!res.ok) {
+        if (res.code === 404) return { ok: false, reason: "NOT_FOUND" };
+        return { ok: false, reason: "HTTP_" + res.code };
+    }
+
+    var data;
+    try {
+        data = JSON.parse(res.text);
+    } catch (e) {
+        return { ok: false, reason: "PARSE_ERROR" };
+    }
+
+    if (!data || !data.ArmoryProfile) return { ok: false, reason: "NO_DATA" };
+
+    try {
+        var p = data.ArmoryProfile || {};
+        var ap = data.ArkPassive || {};
+        // 공식 API 기준 단수형(Engraving, Gem) 사용
+        var eng = data.ArmoryEngraving || {};
+        var gems = data.ArmoryGem || {};
+        var cards = data.ArmoryCard || {};
+        // ArkGrid는 최상단에 존재할 수 있으므로 분기 처리
+        var grid = data.ArkGrid || ap.ArkGrid || {};
+
+        // 1. 이름 (템렙) - 콤마 제거
+        var itemLv = String(p.ItemAvgLevel || "").replace(/,/g, "");
+        var line1 = p.CharacterName + " (" + itemLv + ")";
+
+        // 2. 아크패시브 칭호 + 직업
+        var title = ap.Title || "";
+        var line2 = (title ? title + " " : "") + p.CharacterClassName;
+
+        // 3. 원대 / 서버 / 길드
+        var line3 = p.ExpeditionLevel + "/" + p.ServerName + "/" + (p.GuildName || "길드없음");
+
+        // 4. 전투력 / 명예 - 콤마 제거
+        var cp = String(p.CombatPower || "0").replace(/,/g, "");
+        var honor = p.HonorPoint || 0;
+        var line4 = "전투력 " + cp + "/명예 " + honor;
+
+        // 5. 아크패시브 각인 (마나 4/전문 3/...)
+        var engList = [];
+        if (eng.ArkPassiveEffects && eng.ArkPassiveEffects.length > 0) {
+            for (var i = 0; i < eng.ArkPassiveEffects.length; i++) {
+                var eff = eng.ArkPassiveEffects[i];
+                // Level이 0일 때 생략되는 문제 해결 (null/undefined만 체크)
+                if (eff.Name && eff.Level != null) {
+                    engList.push(String(eff.Name).substring(0, 2) + eff.Level);
+                }
+            }
+        }
+        var line5 = engList.length > 0 ? engList.join("/") : "각인 없음";
+
+        // 6. 보석 평균
+        var gemAvgText = "보석 없음";
+        if (gems.Gems && gems.Gems.length > 0) {
+            var sumLv = 0;
+            for (var g = 0; g < gems.Gems.length; g++) {
+                sumLv += parseInt(gems.Gems[g].Level || 0, 10);
+            }
+            var avgLv = sumLv / gems.Gems.length;
+            gemAvgText = "보석 " + (Math.round(avgLv * 10) / 10).toFixed(1) + "lv";
+        }
+
+        // 7. 진/깨/도 (이름 기반 탐색으로 변경하여 안정성 확보)
+        var jin = 0, kkae = 0, do_ = 0;
+        if (ap.Points && ap.Points.length > 0) {
+            for (var pt = 0; pt < ap.Points.length; pt++) {
+                var ptName = ap.Points[pt].Name;
+                if (ptName === "진화") jin = ap.Points[pt].Value;
+                else if (ptName === "깨달음") kkae = ap.Points[pt].Value;
+                else if (ptName === "도약") do_ = ap.Points[pt].Value;
+            }
+        }
+        var line7 = "진/깨/도 " + jin + "/" + kkae + "/" + do_;
+
+        // 8. 코어 (고대/유물 카운트)
+        var coreGode = 0, coreYumul = 0;
+        var gridSlots = grid.Slots || [];
+        if (gridSlots.length > 0) {
+            for (var s = 0; s < gridSlots.length; s++) {
+                var grade = gridSlots[s].Grade;
+                if (grade === "고대") coreGode++;
+                else if (grade === "유물") coreYumul++;
+            }
+        }
+        var line8 = "코어 고대x" + coreGode + ", 유물x" + coreYumul;
+
+        // 9. 카드 (세트명 '세트' 글자 제거 및 각성수치 추출)
+        var line9 = "카드 세트 없음";
+        if (cards.Effects && cards.Effects.length > 0) {
+            var effectGroup = cards.Effects[cards.Effects.length - 1];
+
+            // Effects 안의 Items 배열에 접근
+            if (effectGroup.Items && effectGroup.Items.length > 0) {
+                var lastItem = effectGroup.Items[effectGroup.Items.length - 1];
+                var rawName = lastItem.Name || ""; // 예: "남겨진 바람의 절벽 6세트 (30각성합계)"
+
+                // 1. "세트"라는 단어 이전까지만 추출 (예: "남겨진 바람의 절벽 6")
+                var mSet = rawName.match(/^(.*?)\s*세트/);
+                var setName = mSet ? mSet[1] : rawName.split(" (")[0]; // 예외 처리
+
+                // 2. 숫자+각성 패턴 추출 (예: 30)
+                var mAwake = rawName.match(/(\d+)(?=각성)/);
+                var cAwake = mAwake ? "(" + mAwake[1] + ")" : "";
+
+                // 3. 최종 조합 -> "남겨진 바람의 절벽 6(30)"
+                line9 = setName + cAwake;
+            }
+        }
+
+        // 결과 합치기
+        var out = [
+            "[beta]",
+            line1,
+            "",
+            line2,
+            line3,
+            "",
+            line4,
+            line5,
+            "",
+            gemAvgText,
+            line7,
+            line8,
+            line9
+        ].join("\n");
+
+        return { ok: true, content: out.trim() };
+
+    } catch (e) {
+        Log.e("[LOA] Info parse error: " + e);
+        return { ok: false, reason: "PARSE_ERROR" };
+    }
+}
 // GET /armories/characters/{charName}/arkgrid
 function fetchArkGrid(charNameRaw) {
     var charName = String(charNameRaw);
@@ -1954,6 +2098,25 @@ bot.addListener(Event.MESSAGE, function (msg) {
             "\n⏳ 다음주 ➜ " + nextGuardian;
 
         msg.reply(resultMsg);
+        return;
+    }
+
+    // 통합 정보 조회 (.ㅈㅂ, ㅈㅂ, .정보)
+    var mInfo = content.match(/^(?:\.?ㅈㅂ|\.정보|ㅈㅂ)\s+(\S+)$/);
+    if (mInfo) {
+        var charInfo = mInfo[1];
+        logCommand(msg, "통합 정보 조회", charInfo);
+
+        try {
+            var rInfo = fetchIntegratedInfo(charInfo);
+            if (rInfo.ok) {
+                msg.reply(rInfo.content);
+            } else {
+                handleApiError(msg, rInfo.reason, "통합 정보 조회", charInfo);
+            }
+        } catch (e) {
+            handleApiError(msg, e, "통합 정보 조회", charInfo);
+        }
         return;
     }
 });
