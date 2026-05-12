@@ -24,9 +24,6 @@ function isAllowedRoom(roomName) {
 
 var LOSTARK_BASE = "https://developer-lostark.game.onstove.com";
 
-// 전역 토글
-var LOA_DEBUG = true;
-
 // 파일 경로
 const RAID_REWARD_FILE = "sdcard/Sybot/raid_rewards.json";
 const CONFIG_PATH = "/sdcard/Sybot/config.json";
@@ -114,12 +111,13 @@ function loadConfig(filePath, defaultData) {
 
 function init() {
     config = loadConfig(CONFIG_PATH, LOSTARK_DEFAULT_CONFIG);
-    Log.i("설정 로드 완료!");
+    Log.i("[LOA] 설정 로드 완료 (CONFIG_PATH)");
 }
 
 
 // 로깅 헬퍼 함수: [방이름/보낸사람] 명령어: 인자 형태
 function logCommand(msg, cmdType, arg) {
+    if (!ARK_OPTS.log) return;
     try {
         // 예: [아크라시아/서윤] 전투력 조회: 닉네임
         Log.i("[" + msg.room + "/" + msg.author.name + "] " + cmdType + ": " + (arg || ""));
@@ -142,8 +140,9 @@ function handleApiError(msg, error, context, extraInfo) {
     // Case 1: 비즈니스 로직 에러 (사용자에게 친절하게 안내)
     // ----------------------------------------
     if (errCode === "NOT_FOUND") {
+        Log.i("[" + context + "] NOT_FOUND: " + (extraInfo || ""));
         msg.reply("'" + (extraInfo || "캐릭터") + "'를 찾을 수 없어요.");
-        return; // 로그는 굳이 안 남기거나 Info로 남김
+        return;
     }
 
     if (errCode === "HTTP_401" || errCode === "HTTP_403") {
@@ -153,16 +152,19 @@ function handleApiError(msg, error, context, extraInfo) {
     }
 
     if (errCode === "NO_FIELD" || errCode === "MAINTENANCE") {
+        Log.i("[" + context + "] NO_FIELD: " + (extraInfo || ""));
         msg.reply("정보를 가져올 수 없어요.");
         return;
     }
 
     if (errCode === "NO_BRACELET") {
+        Log.i("[" + context + "] NO_BRACELET: " + (extraInfo || ""));
         msg.reply("장착 중인 팔찌가 없거나 정보를 볼 수 없어요.");
         return;
     }
 
     if (errCode === "NO_GEMS") {
+        Log.i("[" + context + "] NO_GEMS: " + (extraInfo || ""));
         msg.reply("해당 캐릭터는 보석을 착용하고 있지 않습니다.");
         return;
     }
@@ -287,7 +289,7 @@ function fetchCombatPower(charNameRaw) {
     var dt = java.lang.System.currentTimeMillis() - t0;
 
     if (!res.ok) {
-        Log.e("[LOA] HTTP FAIL code=" + res.code + " ms=" + dt + " url=" + url);
+        Log.e("[LOA] HTTP FAIL code=" + res.code + " ms=" + dt);
         if (res.code === 404) return { ok: false, reason: "NOT_FOUND" };
         return { ok: false, reason: "HTTP_" + res.code };
     }
@@ -355,13 +357,13 @@ function fetchParadisePower(charNameRaw) {
     var dt = java.lang.System.currentTimeMillis() - t0;
 
     if (!res.ok) {
-        Log.e("[LOA] PP HTTP FAIL code=" + res.code + " ms=" + dt + " url=" + url);
+        Log.e("[LOA] PP HTTP FAIL code=" + res.code + " ms=" + dt);
         if (res.code === 404) return { ok: false, reason: "NOT_FOUND" };
         return { ok: false, reason: "HTTP_" + res.code };
     }
 
     var body = res.text || "";
-    if (LOA_DEBUG) Log.i("[LOA] PP HTTP OK code=" + res.code + " ms=" + dt + " bytes=" + body.length);
+    if (ARK_OPTS.log) Log.i("[LOA] PP HTTP OK code=" + res.code + " ms=" + dt + " bytes=" + body.length);
 
     var arr;
     try {
@@ -385,20 +387,9 @@ function fetchParadisePower(charNameRaw) {
     // Tooltip → 낙원력 추출
     var pp = extractParadisePowerFromTooltip(orb.Tooltip);
     if (!pp) {
-        if (LOA_DEBUG) Log.w("[LOA] PP NO_VALUE rawTooltip.head120=" + String(orb.Tooltip).slice(0, 120));
+        if (ARK_OPTS.log) Log.w("[LOA] PP NO_VALUE rawTooltip.head120=" + String(orb.Tooltip).slice(0, 120));
         return { ok: false, reason: "NO_VALUE" };
     }
-
-    // 포맷 전 로깅
-    if (LOA_DEBUG) {
-        var head = String(pp).slice(0, 20);
-        var codes = [];
-        for (var j = 0; j < head.length; j++) codes.push(head.charCodeAt(j));
-        Log.i("[LOA] PP BEFORE_FMT raw='" + head + "' codes=" + codes.join(","));
-    }
-
-    // "만" 표기는 출력 시점에 적용하므로 여기선 원본 숫자 문자열로 반환
-    if (LOA_DEBUG) Log.i("[LOA] PP RAW '" + pp + "'");
 
     return { ok: true, name: charName, paradisePower: pp };
 
@@ -568,16 +559,6 @@ function formatCoreActivationList(slots) {
     return out.join("\n");
 }
 
-
-// Tooltip 본문에서 [활성] 라인들만 뽑기 (최대 5줄)
-function extractActivationLinesFromTooltip(tooltipStr) {
-    const blockHtml = getCoreOptionsBlock(tooltipStr);
-    const plain = tooltipToPlainText(blockHtml);
-    // 줄 단위로 나눔 (빈 줄 제외)
-    const lines = plain.split("\n").map(l => l.trim()).filter(Boolean);
-    // 각 줄 앞에 [활성] 붙이기 (이미 "[10P]" 등 포함됨)
-    return lines.map(l => `[활성] ${l}`);
-}
 
 // 아이템(보통 {Name, Grade, Tooltip})을 요약 문자열 한 줄로 만들기
 function summarizeArkItem(it) {
@@ -1059,48 +1040,8 @@ function renderArkGridView(model) {
  *  스키마: { version:1, raids: { [레이드명]: { [난이도]: [ {gate,gold,moreGold,clear[],more[]} ] } } }
  * ─────────────────────────────────────────*****/
 
-
-// UTF-8 읽기 (이모지/한글 안전)
-function readTextUtf8(path) {
-    try {
-        var file = new java.io.File(path);
-        if (!file.exists()) return null;
-        var fis = new java.io.FileInputStream(file);
-        var isr = new java.io.InputStreamReader(fis, "UTF-8");
-        var br = new java.io.BufferedReader(isr);
-
-        var sb = new java.lang.StringBuilder();
-        var line;
-        while ((line = br.readLine()) !== null) sb.append(line).append('\n');
-        br.close(); isr.close(); fis.close();
-        return String(sb.toString());
-    } catch (e) {
-        try { Log.e("[RAID] readTextUtf8 error: " + e); } catch (_) { }
-        return null;
-    }
-}
-
-
 function _normKey(s) {
     return String(s || "").replace(/\s+/g, "").toLowerCase();
-}
-
-function mergeItems(dstMap, items) {
-    if (!items || !items.length) return;
-    for (var i = 0; i < items.length; i++) {
-        var it = items[i] || {};
-        var name = String(it.name || "").trim();
-        var qty = Math.round(Number(it.qty) || 0);
-        if (!name || qty === 0) continue;
-        dstMap[name] = (dstMap[name] || 0) + qty;
-    }
-}
-
-function itemsToText(items) {
-    if (!items || !items.length) return "";
-    return items.map(function (it) {
-        return String(it.name) + " x " + Math.round(Number(it.qty) || 0);
-    }).join(" + ");
 }
 
 function mapToText(mapObj) {
@@ -1149,8 +1090,8 @@ function loadRaidRewards() {
         ? RAID_REWARD_FILE
         : "/sdcard/Sybot/data/raid_rewards.json";
 
-    // 3. 최신 내장 API를 사용하여 JSON 읽기 (try-catch 불필요)
-    const js = FileStream.readJson(path);
+    // 3. 안전한 파싱 함수(safeReadJson) 사용
+    const js = safeReadJson(path);
 
     // 4. 데이터 유효성 검사 (파일이 없거나 JSON 형식이 안 맞으면 null 반환)
     if (!js || !js.raids) {
@@ -1172,6 +1113,7 @@ const fetchSiblings = (characterName) => {
     const apiUrl = `${baseUrl}/characters/${encodeURIComponent(cleanName)}/siblings`;
 
     try {
+        Log.i("[LOA] Fetching siblings for: " + cleanName + " from URL: " + apiUrl);
         const url = new java.net.URL(apiUrl);
         const conn = url.openConnection();
         conn.setRequestMethod("GET");
@@ -1181,7 +1123,10 @@ const fetchSiblings = (characterName) => {
         conn.setRequestProperty("accept", "application/json");
 
         const responseCode = conn.getResponseCode();
-        if (responseCode !== 200) return { ok: false, reason: "API_ERROR", detail: `HTTP ${responseCode}` };
+        if (responseCode !== 200) {
+            Log.e("[LOA] Siblings HTTP FAIL code=" + responseCode);
+            return { ok: false, reason: "API_ERROR", detail: `HTTP ${responseCode}` };
+        }
 
         const is = conn.getInputStream();
         const br = new java.io.BufferedReader(new java.io.InputStreamReader(is, "UTF-8"));
@@ -1220,6 +1165,7 @@ const fetchSiblings = (characterName) => {
 
         return { ok: true, content: content.trim() };
     } catch (e) {
+        Log.e("[LOA] Error fetching siblings: " + e);
         return { ok: false, reason: "SYSTEM_ERROR", detail: e.message };
     }
 };
@@ -1863,8 +1809,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
     if (mAlt) {
         const charAlt = mAlt[1];
 
-        if (isAllowedRoom(room)) {
-            logCommand(msg, "원대 조회", charAlt);
+        logCommand(msg, "원대 조회", charAlt);
 
             try {
                 const rAlt = fetchSiblings(charAlt);
@@ -1922,7 +1867,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
 
             var schedule = result.data;
             var dates = Object.keys(schedule).sort();
-            Log.i("[쌀섬] 추출된 골드섬 날짜 목록: " + dates.join(", "));
+            Log.i("[쌀섬] 날짜 목록 " + dates.length + "개 추출");
 
             var now = new Date();
             var utc = now.getTime() + (now.getTimezoneOffset() * 60000);
@@ -2023,7 +1968,6 @@ bot.addListener(Event.MESSAGE, function (msg) {
     // .시너지, .ㅅㄴㅈ, ㅅㄴㅈ 와 매칭되며 뒤에 검색어가 올 수 있음
     var mSynergy = content.match(/^(?:\.시너지|\.?ㅅㄴㅈ)(?:\s+(.+))?$/);
     if (mSynergy) {
-        logCommand(msg, "시너지 조회", mSynergy[1] || "");
         var synergyQuery = mSynergy[1] || "";
         logCommand(msg, "시너지 조회", synergyQuery);
 
