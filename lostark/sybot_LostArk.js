@@ -25,7 +25,7 @@ function isAllowedRoom(roomName) {
 var LOSTARK_BASE = "https://developer-lostark.game.onstove.com";
 
 // 파일 경로
-const RAID_REWARD_FILE = "sdcard/Sybot/raid_rewards.json";
+const RAID_REWARD_FILE = "/sdcard/Sybot/raid_rewards.json";
 const CONFIG_PATH = "/sdcard/Sybot/config.json";
 
 let _raidRewardCache = null;
@@ -169,11 +169,6 @@ function handleApiError(msg, error, context, extraInfo) {
         return;
     }
 
-    if (errCode === "NO_BRACELET") {
-        msg.reply("해당 캐릭터는 팔찌를 착용하고 있지 않습니다.");
-        return;
-    }
-
     // ----------------------------------------
     // Case 2: 진짜 시스템 에러/예외 (개발자용 로그)
     // ----------------------------------------
@@ -308,7 +303,6 @@ function fetchCombatPower(charNameRaw) {
     var cp = null;
     if (json) {
         if (json.CombatPower != null) cp = json.CombatPower;
-        else if (json["CombatPower"] != null) cp = json["CombatPower"];
     }
     if (cp == null || cp === "") {
         Log.w("[LOA] NO CombatPower field in response");
@@ -1109,8 +1103,7 @@ function loadRaidRewards() {
  */
 const fetchSiblings = (characterName) => {
     const cleanName = characterName.trim();
-    const baseUrl = "https://developer-lostark.game.onstove.com";
-    const apiUrl = `${baseUrl}/characters/${encodeURIComponent(cleanName)}/siblings`;
+    const apiUrl = `${LOSTARK_BASE}/characters/${encodeURIComponent(cleanName)}/siblings`;
 
     try {
         Log.i("[LOA] Fetching siblings for: " + cleanName + " from URL: " + apiUrl);
@@ -1666,17 +1659,17 @@ bot.addListener(Event.MESSAGE, function (msg) {
     var mPP = content.match(/^(?:\.낙원력|\.?ㄴㅇㄹ)\s+(\S+)$/);
     if (mPP) {
         var charPP = mPP[1];
-        logCommand(msg, "낙원력 조회", charCP);
+        logCommand(msg, "낙원력 조회", charPP);
 
         try {
             var r2 = fetchParadisePower(charPP);
             if (r2.ok) {
                 msg.reply(r2.name + "의\n\n⭐낙원력: " + formatManKorean(r2.paradisePower) + "\n※ 시즌1 보주를 착용하고 있을 경우 시즌1로 표시됩니다.");
             } else {
-                handleApiError(msg, r2.reason, "낙원력 조회", charCP);
+                handleApiError(msg, r2.reason, "낙원력 조회", charPP);
             }
         } catch (e) {
-            handleApiError(msg, e, "낙원력 조회", charCP);
+            handleApiError(msg, e, "낙원력 조회", charPP);
         }
         return;
     }
@@ -1784,7 +1777,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
             // 횟수 제한 로직
             if (count > 10) {
                 msg.reply("지옥은 최대 10번까지만 갈 수 있어요! (10회로 실행합니다)");
-                count = 30;
+                count = 10;
             } else if (count <= 0) {
                 msg.reply("지옥에 가려면 1 이상의 숫자를 입력해주세요.");
                 return;
@@ -1811,28 +1804,28 @@ bot.addListener(Event.MESSAGE, function (msg) {
 
         logCommand(msg, "원대 조회", charAlt);
 
-            try {
-                const rAlt = fetchSiblings(charAlt);
+        try {
+            const rAlt = fetchSiblings(charAlt);
 
-                if (rAlt && rAlt.ok) {
-                    msg.reply(rAlt.content);
+            if (rAlt && rAlt.ok) {
+                msg.reply(rAlt.content);
+            } else {
+                const altReason = rAlt ? rAlt.reason : "UNKNOWN";
+                if (altReason === "NOT_FOUND") {
+                    msg.reply(`${charAlt} 캐릭터를 찾을 수 없어요. (닉네임을 확인해주세요)`);
                 } else {
-                    const altReason = rAlt ? rAlt.reason : "UNKNOWN";
-                    if (altReason === "NOT_FOUND") {
-                        msg.reply(`${charAlt} 캐릭터를 찾을 수 없어요. (닉네임을 확인해주세요)`);
-                    } else {
-                        handleApiError(msg, altReason, "원대 조회", charAlt);
-                    }
+                    handleApiError(msg, altReason, "원대 조회", charAlt);
                 }
-            } catch (e) {
-                handleApiError(msg, e.message, "원대 조회", charAlt);
             }
+        } catch (e) {
+            handleApiError(msg, e.message, "원대 조회", charAlt);
         }
         return;
     }
 
+
     // 패치노트
-    var mPatch = content.match(/^(\.패치노트|\.?ㅍㅊㄴㅌ|.ㅍㅊ)$/);
+    var mPatch = content.match(/^(\.패치노트|\.?ㅍㅊㄴㅌ|\.?ㅍㅊ)$/);
     if (mPatch) {
         logCommand(msg, "패치노트 조회", "");
 
@@ -1852,7 +1845,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
     }
 
     // 쌀섬(골드 모험섬) 일정 조회
-    var mRice = content.match(/^(\.쌀|.모험섬)$/);
+    var mRice = content.match(/^(\.쌀|\.모험섬)$/);
     if (mRice) {
         Log.i("[쌀섬] 명령어 인식 성공!");
         logCommand(msg, "쌀섬 조회", "");
@@ -2038,8 +2031,8 @@ bot.addListener(Event.MESSAGE, function (msg) {
         const nextGuardian = guardianRotation[nextIndex];
 
         // 출력 형식 업데이트
-        const resultMsg = "✅ 이번주 ➜ " + targetGuardian +
-            "\n⏳ 다음주 ➜ " + nextGuardian;
+        const resultMsg = "이번주\n⚔️" + targetGuardian +
+            "\n\n다음주\n⏳" + nextGuardian;
 
         msg.reply(resultMsg);
         return;
