@@ -1243,12 +1243,15 @@ function fetchGoldIslands() {
             // 3. 추출한 일정(targetTimes)을 바탕으로 날짜별 맵핑
             if (targetTimes) {
                 for (var s = 0; s < targetTimes.length; s++) {
-                    var dateStr = String(targetTimes[s]).split("T")[0];
+                    var timeStr = String(targetTimes[s]);
+                    var dateStr = timeStr.split("T")[0];
+                    var hour = parseInt(timeStr.substring(11, 13), 10);
+                    var period = hour < 15 ? "오전" : "오후";
 
                     if (!goldIslandsByDate[dateStr]) {
-                        goldIslandsByDate[dateStr] = {};
+                        goldIslandsByDate[dateStr] = { "오전": {}, "오후": {} };
                     }
-                    goldIslandsByDate[dateStr][islandName] = true;
+                    goldIslandsByDate[dateStr][period][islandName] = true;
                 }
             }
         }
@@ -1258,6 +1261,18 @@ function fetchGoldIslands() {
         Log.e("[쌀섬] 데이터 파싱/처리 중 에러: " + e);
         return { ok: false, reason: "PARSE_ERROR" };
     }
+}
+
+function formatGoldIslands(dayData) {
+    var am = Object.keys(dayData["오전"]).join(", ");
+    var pm = Object.keys(dayData["오후"]).join(", ");
+    if (am && pm) {
+        if (am === pm) return am;                               // 평일: 같은 섬, 표시 없이
+        return "(오전) " + am + " / (오후) " + pm;              // 주말: 오전/오후 다른 섬
+    }
+    if (am) return "(오전) " + am;                              // 오전에만 골드
+    if (pm) return "(오후) " + pm;                              // 오후에만 골드
+    return "없음";
 }
 
 /**
@@ -1874,7 +1889,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
 
             var todayIslands = "없음";
             if (schedule[todayStr]) {
-                todayIslands = Object.keys(schedule[todayStr]).join(", ");
+                todayIslands = formatGoldIslands(schedule[todayStr]);
             }
 
             var out = "오늘의 쌀섬 : " + todayIslands + "\n";
@@ -1884,8 +1899,8 @@ bot.addListener(Event.MESSAGE, function (msg) {
             var printCount = 0;
             for (var i = 0; i < dates.length; i++) {
                 var d = dates[i];
-                if (d >= todayStr) {
-                    var islands = Object.keys(schedule[d]).join(", ");
+                if (d > todayStr) {                             // >= → > (오늘 중복 제거)
+                    var islands = formatGoldIslands(schedule[d]);
                     var dateParts = d.split("-");
                     var displayDate = parseInt(dateParts[1], 10) + "월 " + parseInt(dateParts[2], 10) + "일";
 
