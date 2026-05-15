@@ -1860,7 +1860,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
     }
 
     // 쌀섬(골드 모험섬) 일정 조회
-    var mRice = content.match(/^(\.쌀|\.모험섬)$/);
+    var mRice = content.match(/^(\.쌀|\.모험섬|\.쌀섬)$/);
     if (mRice) {
         Log.i("[쌀섬] 명령어 인식 성공!");
         logCommand(msg, "쌀섬 조회", "");
