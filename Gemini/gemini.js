@@ -115,7 +115,7 @@ function init() {
 function askGemini(prompt) {
     Log.d("[Gemini API] 답변 생성 요청 시작..."); // 📝 작동 로그 추가
 
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key=${config.GEMINI_API_KEY}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=${config.GEMINI_API_KEY}`;
 
     try {
         const requestBody = {
