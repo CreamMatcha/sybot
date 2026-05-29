@@ -605,6 +605,26 @@ function fetchProfileClassName(charNameRaw) {
 }
 
 
+// 장착 중인 칭호만 빠르게 가져오기
+function fetchTitle(charNameRaw) {
+    try {
+        var charName = String(charNameRaw);
+        var url = LOSTARK_BASE + "/armories/characters/" + charName + "/profiles";
+        var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
+        if (!res.ok) {
+            if (res.code === 404) return { ok: false, reason: "NOT_FOUND" };
+            return { ok: false, reason: "HTTP_" + res.code };
+        }
+        var json;
+        try { json = JSON.parse(res.text || "{}"); } catch (e) { return { ok: false, reason: "PARSE_ERROR" }; }
+        if (!json) return { ok: false, reason: "NO_DATA" };
+        return { ok: true, name: charName, title: json.Title || null };
+    } catch (e) {
+        try { Log.e("[LOA] fetchTitle error: " + e); } catch (_) { }
+        return { ok: false, reason: "SYSTEM_ERROR" };
+    }
+}
+
 // ==========================================
 // 캐릭터 통합 정보 조회 (.ㅈㅂ)
 // ==========================================
@@ -725,21 +745,11 @@ function fetchIntegratedInfo(charNameRaw) {
         }
 
         // 결과 합치기
-        var out = [
-            "[beta]",
-            line1,
-            "",
-            line2,
-            line3,
-            "",
-            line4,
-            line5,
-            "",
-            gemAvgText,
-            line7,
-            line8,
-            line9
-        ].join("\n");
+        var outLines = ["[beta]"];
+        // 장착 중인 칭호 (없으면 줄 생략)
+        if (p.Title) outLines.push(p.Title);
+        outLines.push(line1, "", line2, line3, "", line4, line5, "", gemAvgText, line7, line8, line9);
+        var out = outLines.join("\n");
 
         return { ok: true, content: out.trim() };
 
@@ -1165,27 +1175,46 @@ const fetchSiblings = (characterName) => {
 
 /**
  * 로스트아크 최신 패치노트 조회 함수
+ * "업데이트" 또는 "정기 점검 완료" 키워드가 들어간 공지 중 가장 최신글을 반환.
+ * (2026.05 기준: 업데이트 공지가 "정기 점검 완료 안내" 제목으로도 올라오는 경우 대응)
  */
 function fetchLatestPatchNote() {
-    var url = LOSTARK_BASE + "/news/notices?searchText=" + encodeURIComponent("업데이트") + "&type=" + encodeURIComponent("공지");
+    var keywords = ["업데이트", "정기 점검 완료"];
+    var candidates = [];
+    var lastHttpFail = null;
 
-    // httpGetUtf8 활용
-    var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
+    for (var i = 0; i < keywords.length; i++) {
+        var url = LOSTARK_BASE + "/news/notices?searchText=" + encodeURIComponent(keywords[i]) + "&type=" + encodeURIComponent("공지");
+        var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
 
-    if (!res.ok) {
-        return { ok: false, reason: "HTTP_" + res.code };
-    }
-
-    try {
-        var list = JSON.parse(res.text);
-        if (Array.isArray(list) && list.length > 0) {
-            // 맨 첫 번째 항목(가장 최신) 반환
-            return { ok: true, data: list[0] };
+        if (!res.ok) {
+            lastHttpFail = "HTTP_" + res.code;
+            continue; // 한쪽이 실패해도 다른 키워드는 계속 시도
         }
-        return { ok: false, reason: "NO_DATA" };
-    } catch (e) {
-        return { ok: false, reason: "PARSE_ERROR" };
+
+        try {
+            var list = JSON.parse(res.text);
+            if (Array.isArray(list) && list.length > 0) {
+                candidates.push(list[0]); // 각 키워드별 가장 최신 항목 (API 기본 정렬)
+            }
+        } catch (e) {
+            // 한쪽 파싱 실패해도 다른 키워드 결과는 사용
+        }
     }
+
+    if (candidates.length === 0) {
+        return { ok: false, reason: lastHttpFail || "NO_DATA" };
+    }
+
+    // Date 필드(ISO 형식)로 가장 최신 항목 선택. 문자열 비교만으로 시간순 정렬 가능.
+    var latest = candidates[0];
+    for (var j = 1; j < candidates.length; j++) {
+        var lDate = String(latest.Date || "");
+        var cDate = String(candidates[j].Date || "");
+        if (cDate > lDate) latest = candidates[j];
+    }
+
+    return { ok: true, data: latest };
 }
 /**
  * 로스트아크 캘린더 API에서 골드를 주는 모험 섬(쌀섬) 일정을 가져오는 함수
@@ -1840,7 +1869,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
 
 
     // 패치노트
-    var mPatch = content.match(/^(\.패치노트|\.?ㅍㅊㄴㅌ|\.?ㅍㅊ)$/);
+    var mPatch = content.match(/^(\.패치노트|\.?ㅍㅊㄴㅌ|\.?ㅍㅊ|\.패치)$/);
     if (mPatch) {
         logCommand(msg, "패치노트 조회", "");
 
@@ -2050,6 +2079,29 @@ bot.addListener(Event.MESSAGE, function (msg) {
             "\n\n다음주\n⏳" + nextGuardian;
 
         msg.reply(resultMsg);
+        return;
+    }
+
+    // 칭호 조회 (.칭호, .ㅊㅎ, ㅊㅎ)
+    var mTitle = content.match(/^(?:\.칭호|\.?ㅊㅎ)\s+(\S+)$/);
+    if (mTitle) {
+        var charTitleName = mTitle[1];
+        logCommand(msg, "칭호 조회", charTitleName);
+
+        try {
+            var rTitle = fetchTitle(charTitleName);
+            if (rTitle.ok) {
+                if (rTitle.title) {
+                    msg.reply(rTitle.name + "의 칭호\n\n" + rTitle.title);
+                } else {
+                    msg.reply(rTitle.name + "은(는) 칭호를 장착하고 있지 않아요.");
+                }
+            } else {
+                handleApiError(msg, rTitle.reason, "칭호 조회", charTitleName);
+            }
+        } catch (e) {
+            handleApiError(msg, e, "칭호 조회", charTitleName);
+        }
         return;
     }
 
