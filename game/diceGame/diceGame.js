@@ -27,6 +27,7 @@
 const bot = BotManager.getCurrentBot();
 const CONFIG_PATH = "/sdcard/Sybot/config.json";
 const File = Java.type("java.io.File");
+const ReentrantLock = Java.type("java.util.concurrent.locks.ReentrantLock");
 
 const DICE_DEFAULT_CONFIG = { ADMIN_HASH: "no_HASH" };
 let config = {};
@@ -35,6 +36,17 @@ const ALLOWED_ROOMS = ["아크라시아인의 휴식처"];
 const PREFIX = ".";
 const DATA_DIR = "/sdcard/Sybot/DiceGame";
 const DATA_PATH = `${DATA_DIR}/user_data.json`;
+const BACKUP_DIR = `${DATA_DIR}/backups`;
+const AUDIT_LOG_PATH = `${DATA_DIR}/audit.log`;
+const DATA_SCHEMA_VERSION = 1;
+const BACKUP_KEEP_COUNT = 50;
+const INTERNAL_KEYS = ["_meta"];
+const mainLock = new ReentrantLock(true);
+const INITIAL_POINTS = 100000;
+
+// [중복 방지용] 최근 처리한 메시지의 logId를 임시 저장할 배열과 최대 크기
+const recentLogIds = [];
+const MAX_LOG_CACHE_SIZE = 50;
 
 /* ==================== 상점 아이템 정의 ==================== */
 // 가격은 제안가의 10배
@@ -136,24 +148,206 @@ function checkTitle(id, user) {
 function initFileSystem() {
     const dir = new File(DATA_DIR);
     if (!dir.exists()) dir.mkdirs();
+    const backupDir = new File(BACKUP_DIR);
+    if (!backupDir.exists()) backupDir.mkdirs();
     if (!FileStream.exists(DATA_PATH)) safeWriteJson(DATA_PATH, {});
 }
 
 function loadUserData() {
     try {
         initFileSystem();
-        return safeReadJson(DATA_PATH) || {};
+        const data = safeReadJson(DATA_PATH) || {};
+        return normalizeUserData(data, "LOAD");
     } catch (e) {
         Log.e(`데이터 로드 실패: ${e.message}`);
-        return {};
+        return createEmptyUserData();
     }
 }
 
 function saveUserData(data) {
     try {
-        safeWriteJson(DATA_PATH, data);
+        const normalized = normalizeUserData(data, "SAVE");
+        safeWriteJson(DATA_PATH, normalized);
     } catch (e) {
         Log.e(`데이터 저장 실패: ${e.message}`);
+    }
+}
+
+function pad2(n) {
+    return n < 10 ? "0" + n : String(n);
+}
+
+function pad3(n) {
+    if (n < 10) return "00" + n;
+    if (n < 100) return "0" + n;
+    return String(n);
+}
+
+function formatTimestampForFile(date) {
+    return date.getFullYear() +
+        pad2(date.getMonth() + 1) +
+        pad2(date.getDate()) + "_" +
+        pad2(date.getHours()) +
+        pad2(date.getMinutes()) +
+        pad2(date.getSeconds()) + "_" +
+        pad3(date.getMilliseconds());
+}
+
+function getUserHashes(db) {
+    return Object.keys(db).filter(k => INTERNAL_KEYS.indexOf(k) === -1);
+}
+
+function createEmptyUserData() {
+    return {
+        _meta: {
+            schemaVersion: DATA_SCHEMA_VERSION,
+            createdAt: Date.now(),
+            updatedAt: Date.now()
+        }
+    };
+}
+
+function normalizeNumber(value, fallback) {
+    const n = Number(value);
+    return isNaN(n) ? fallback : n;
+}
+
+function normalizeUserData(data, traceId) {
+    if (!data || typeof data !== "object") {
+        Log.w(`[DiceGame][${traceId}] DATA_INVALID_ROOT -> reset empty db`);
+        return createEmptyUserData();
+    }
+
+    if (!data._meta || typeof data._meta !== "object") {
+        data._meta = {
+            schemaVersion: DATA_SCHEMA_VERSION,
+            createdAt: Date.now()
+        };
+        Log.i(`[DiceGame][${traceId}] META_CREATED schemaVersion=${DATA_SCHEMA_VERSION}`);
+    }
+
+    data._meta.schemaVersion = DATA_SCHEMA_VERSION;
+    data._meta.updatedAt = Date.now();
+
+    getUserHashes(data).forEach(h => {
+        const u = data[h];
+        if (!u || typeof u !== "object") {
+            Log.w(`[DiceGame][${traceId}] USER_INVALID hash=${h} -> delete`);
+            delete data[h];
+            return;
+        }
+        if (typeof u.name !== "string" || u.name.trim() === "") u.name = "unknown";
+        u.points = normalizeNumber(u.points, INITIAL_POINTS);
+        u.lastDaily = normalizeNumber(u.lastDaily, 0);
+        u.playCount = normalizeNumber(u.playCount, 0);
+        u.lastDice = normalizeNumber(u.lastDice, 0);
+        u.diceCountToday = normalizeNumber(u.diceCountToday, 0);
+        u.diceBonus = normalizeNumber(u.diceBonus, 0);
+        u.lastAllIn = normalizeNumber(u.lastAllIn, 0);
+        u.allInCritFails = normalizeNumber(u.allInCritFails, 0);
+        u.totalCritFails = normalizeNumber(u.totalCritFails, 0);
+        u.tripleCount = normalizeNumber(u.tripleCount, 0);
+        u.critSuccessCount = normalizeNumber(u.critSuccessCount, 0);
+        u.bestSingleGain = normalizeNumber(u.bestSingleGain, 0);
+        u.maxPoints = normalizeNumber(u.maxPoints, u.points);
+        u.insurance = !!u.insurance;
+        if (!Array.isArray(u.earnedTitles)) u.earnedTitles = [];
+        if (typeof u.activeTitle !== "string") u.activeTitle = "";
+        if (!u.shopHistory || typeof u.shopHistory !== "object") u.shopHistory = {};
+        if (!Array.isArray(u.nameHistory)) u.nameHistory = [u.name];
+        if (u.nameHistory.indexOf(u.name) === -1) u.nameHistory.push(u.name);
+    });
+
+    return data;
+}
+
+function snapshotUsers(db) {
+    return getUserHashes(db).map(h => {
+        const u = db[h] || {};
+        return `${u.name || "unknown"}(${h}):${u.points || 0}P`;
+    }).join(", ");
+}
+
+function logDuplicateNames(db, traceId) {
+    const nameMap = {};
+    getUserHashes(db).forEach(h => {
+        const n = db[h] && db[h].name ? db[h].name : "(no-name)";
+        if (!nameMap[n]) nameMap[n] = [];
+        nameMap[n].push(h);
+    });
+    Object.keys(nameMap).forEach(n => {
+        if (nameMap[n].length > 1) {
+            Log.w(`[DiceGame][${traceId}] DUP_NAME name=${n}, hashes=${nameMap[n].join(",")}`);
+        }
+    });
+}
+
+function appendAuditLog(line) {
+    try {
+        initFileSystem();
+        const prev = FileStream.exists(AUDIT_LOG_PATH) ? FileStream.read(AUDIT_LOG_PATH) : "";
+        FileStream.write(AUDIT_LOG_PATH, (prev || "") + line + "\n");
+    } catch (e) {
+        Log.e(`[DiceGame][AUDIT] write failed: ${e.message}`);
+    }
+}
+
+function cleanupOldBackups() {
+    try {
+        const dir = new File(BACKUP_DIR);
+        const files = dir.listFiles();
+        if (!files || files.length <= BACKUP_KEEP_COUNT) return;
+
+        const arr = [];
+        for (let i = 0; i < files.length; i++) {
+            const f = files[i];
+            if (String(f.getName()).indexOf("user_data_") === 0) arr.push(f);
+        }
+        arr.sort((a, b) => String(a.getName()).localeCompare(String(b.getName())));
+        const removeCount = Math.max(0, arr.length - BACKUP_KEEP_COUNT);
+        for (let j = 0; j < removeCount; j++) {
+            const ok = arr[j].delete();
+            Log.i(`[DiceGame][BACKUP] cleanup file=${arr[j].getName()}, deleted=${ok}`);
+        }
+    } catch (e) {
+        Log.e(`[DiceGame][BACKUP] cleanup failed: ${e.message}`);
+    }
+}
+
+function backupUserData(reason) {
+    try {
+        initFileSystem();
+        if (!FileStream.exists(DATA_PATH)) {
+            Log.i(`[DiceGame][BACKUP] skipped reason=${reason}: user_data.json not found`);
+            return;
+        }
+
+        const raw = FileStream.read(DATA_PATH);
+        const stamp = formatTimestampForFile(new Date());
+        const backupPath = `${BACKUP_DIR}/user_data_${stamp}_${reason}.json`;
+        FileStream.write(backupPath, raw || "{}");
+
+        let count = 0;
+        try {
+            const parsed = raw && raw.trim() !== "" ? JSON.parse(String(raw)) : {};
+            count = getUserHashes(parsed).length;
+        } catch (parseErr) {
+            Log.w(`[DiceGame][BACKUP] parse warning reason=${reason}: ${parseErr.message}`);
+        }
+        Log.i(`[DiceGame][BACKUP] saved reason=${reason}, path=${backupPath}, users=${count}, bytes=${raw ? String(raw).length : 0}`);
+        cleanupOldBackups();
+    } catch (e) {
+        Log.e(`[DiceGame][BACKUP] failed reason=${reason}: ${e.message}`);
+    }
+}
+
+function getAdminBackupReason(cmd) {
+    switch (cmd) {
+        case "지급": return "before_admin_grant";
+        case "주사위추가": return "before_admin_dice_add";
+        case "주사위초기화": return "before_admin_dice_reset";
+        case "올인초기화": return "before_admin_allin_reset";
+        default: return "before_admin_command";
     }
 }
 
@@ -201,7 +395,9 @@ function loadConfig(filePath, defaultData) {
 
 function init() {
     initFileSystem();
+    backupUserData("compile");
     config = loadConfig(CONFIG_PATH, DICE_DEFAULT_CONFIG);
+    Log.i(`[DiceGame][INIT] config loaded, adminHashSet=${config.ADMIN_HASH !== "no_HASH"}`);
 }
 
 /* ==================== 유틸리티 ==================== */
@@ -231,16 +427,16 @@ function getTimeUntilMidnight() {
 function resolveTargetUser(db, targetStr) {
     if (/^[0-9]+$/.test(targetStr)) {
         const rank = parseInt(targetStr, 10);
-        const ranking = Object.keys(db)
+        const ranking = getUserHashes(db)
             .map(h => ({ hash: h, pts: db[h].points }))
             .sort((a, b) => b.pts - a.pts);
         if (rank >= 1 && rank <= ranking.length) {
             return { hash: ranking[rank - 1].hash, error: null };
         }
     }
-    let exactHash = Object.keys(db).find(k => db[k].name === targetStr);
+    let exactHash = getUserHashes(db).find(k => db[k].name === targetStr);
     if (exactHash) return { hash: exactHash, error: null };
-    let partial = Object.keys(db).filter(k => db[k].name.includes(targetStr));
+    let partial = getUserHashes(db).filter(k => db[k].name.includes(targetStr));
     if (partial.length === 1) return { hash: partial[0], error: null };
     if (partial.length > 1) {
         const names = partial.map(h => db[h].name).join(", ");
@@ -251,10 +447,19 @@ function resolveTargetUser(db, targetStr) {
 
 /* ==================== 유저 데이터 초기화/보완 ==================== */
 
-function ensureUserFields(u, name) {
+function ensureUserFields(u, name, traceId, hash) {
+    if (u.name !== undefined && u.name !== name) {
+        Log.w(`[DiceGame][${traceId}] NAME_CHANGE hash=${hash}, old=${u.name}, new=${name}`);
+        if (!Array.isArray(u.nameHistory)) u.nameHistory = [];
+        if (u.nameHistory.indexOf(u.name) === -1) u.nameHistory.push(u.name);
+    }
     u.name = name;
+    if (!Array.isArray(u.nameHistory)) u.nameHistory = [];
+    if (u.nameHistory.indexOf(name) === -1) u.nameHistory.push(name);
+    u.lastSeenAt = Date.now();
     if (u.lastDice === undefined) u.lastDice = 0;
     if (u.diceCountToday === undefined) u.diceCountToday = 0;
+    if (u.diceBonus === undefined) u.diceBonus = 0;
     if (u.lastAllIn === undefined) u.lastAllIn = 0;
     if (u.allInCritFails === undefined) u.allInCritFails = 0;  // 연속 실패 (기사회생용)
     if (u.totalCritFails === undefined) u.totalCritFails = 0;  // 누적 실패 (칭호용)
@@ -317,7 +522,33 @@ function onMessage(msg) {
     if (!ALLOWED_ROOMS.includes(msg.room)) return;
     if (!msg.content.startsWith(PREFIX)) return;
 
+    // [수정됨] 카카오톡 고유 메시지 ID(logId)를 활용한 중복 알림 방지 필터링
+    if (msg.logId) {
+        const currentLogId = String(msg.logId);
+        if (recentLogIds.includes(currentLogId)) {
+            Log.d(`[DiceGame] 카카오톡 중복 알림 무시됨 (logId: ${currentLogId})`);
+            return;
+        }
+        recentLogIds.push(currentLogId);
+        // 캐시 배열 크기 유지 (오래된 데이터 삭제)
+        if (recentLogIds.length > MAX_LOG_CACHE_SIZE) {
+            recentLogIds.shift();
+        }
+    }
+
+    mainLock.lock();
+    try {
+        handleMessage(msg);
+    } catch (e) {
+        Log.e(`[DiceGame][LOCK_ERROR] ${e.message}\n${e.stack}`);
+    } finally {
+        mainLock.unlock();
+    }
+}
+
+function handleMessage(msg) {
     const reply = (text) => msg.reply(`[beta]\n${text}`);
+    const traceId = `${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 
     const args = msg.content.trim().substring(PREFIX.length).trim().split(/\s+/);
     let cmd = args[0];
@@ -339,20 +570,26 @@ function onMessage(msg) {
     const db = loadUserData();
     const hash = msg.author.hash;
     const name = msg.author.name;
+    Log.i(`[DiceGame][${traceId}] IN room=${msg.room}, name=${name}, hash=${hash}, rawCmd=${args[0]}, cmd=${cmd}, content=${msg.content}, users=${getUserHashes(db).length}, lockQueue=${mainLock.getQueueLength()}`);
+    logDuplicateNames(db, traceId);
 
     if (!db[hash]) {
+        Log.i(`[DiceGame][${traceId}] NEW_USER hash=${hash}, name=${name}`);
         db[hash] = {
-            name, points: 1000, lastDaily: 0, playCount: 0
+            name, points: INITIAL_POINTS, lastDaily: 0, playCount: 0
         };
     }
-    ensureUserFields(db[hash], name);
+    ensureUserFields(db[hash], name, traceId, hash);
 
     const user = db[hash];
     const now = Date.now();
+    Log.i(`[DiceGame][${traceId}] CURRENT hash=${hash}, dbName=${user.name}, points=${user.points}, diceCount=${user.diceCountToday}, lastDice=${user.lastDice}, lastAllIn=${user.lastAllIn}`);
 
     const updateMaxPoints = () => {
         if (user.points > user.maxPoints) user.maxPoints = user.points;
     };
+
+    let isSuccess = false;
 
     try {
         switch (cmd) {
@@ -444,10 +681,14 @@ function onMessage(msg) {
                     reply(`💎 프리미엄 추첨: ${mult}배!\n+${gain.toLocaleString()}P 획득 (순이익 +${net.toLocaleString()}P)\n잔액: ${user.points.toLocaleString()}P`);
                 }
                 else if (rawItem === "주사위추가") {
-                    if (!isToday(user.lastDice)) user.diceCountToday = 0;
-                    user.diceCountToday = Math.max(0, user.diceCountToday - 1);
+                    if (!isToday(user.lastDice)) {
+                        user.diceCountToday = 0;
+                        user.diceBonus = 0;
+                    }
+                    user.diceBonus = (user.diceBonus || 0) + 1;
                     user.lastDice = now;
-                    reply(`🎲 주사위 기회 1회 추가!\n잔액: ${user.points.toLocaleString()}P`);
+                    const newMax = 5 + user.diceBonus;
+                    reply(`🎲 주사위 기회 1회 추가! (오늘 최대 ${newMax}회)\n잔액: ${user.points.toLocaleString()}P`);
                 }
                 else if (rawItem === "올인보험") {
                     if (user.insurance) {
@@ -556,10 +797,14 @@ function onMessage(msg) {
 
             /* ============ 주사위 ============ */
             case "주사위": {
-                if (!isToday(user.lastDice)) user.diceCountToday = 0;
+                if (!isToday(user.lastDice)) {
+                    user.diceCountToday = 0;
+                    user.diceBonus = 0;
+                }
+                const maxDice = 5 + (user.diceBonus || 0);
 
-                if (user.diceCountToday >= 5) {
-                    reply(`[⏳ 주사위 쿨타임]\n하루 5번 제한\n자정까지: ${getTimeUntilMidnight()}`);
+                if (user.diceCountToday >= maxDice) {
+                    reply(`[⏳ 주사위 쿨타임]\n하루 ${maxDice}번 제한\n자정까지: ${getTimeUntilMidnight()}`);
                     return;
                 }
 
@@ -607,7 +852,7 @@ function onMessage(msg) {
                 checkAndGrantTitles(user, reply);
                 reply(
                     `[🎲 ${d.join(", ")}]\n${desc}\n${resultText}\n` +
-                    `잔액: ${user.points.toLocaleString()}P (오늘 ${user.diceCountToday}/5회)`
+                    `잔액: ${user.points.toLocaleString()}P (오늘 ${user.diceCountToday}/${maxDice}회)`
                 );
                 break;
             }
@@ -633,7 +878,7 @@ function onMessage(msg) {
                 let status = "";
 
                 /* ★ 변경된 올인 확률
-                 *  1~25  (25%) : 전부 손실
+                 * 1~25  (25%) : 전부 손실
                  * 26~75  (50%) : x1.5 이득
                  * 76~100 (25%) : x2   이득
                  */
@@ -707,7 +952,7 @@ function onMessage(msg) {
 
             /* ============ 랭킹 ============ */
             case "랭킹": {
-                const ranking = Object.keys(db)
+                const ranking = getUserHashes(db)
                     .map(h => ({
                         hash: h,
                         name: db[h].name,
@@ -762,10 +1007,16 @@ function onMessage(msg) {
                 const exactCmd = match[1];
                 const targetStr = match[2] || match[3];
                 const numValue = match[4] ? parseInt(match[4], 10) : NaN;
+                Log.i(`[DiceGame][${traceId}] TARGET_REQUEST exactCmd=${exactCmd}, rawTarget=${targetStr}, numValue=${isNaN(numValue) ? "NaN" : numValue}`);
                 const targetResult = resolveTargetUser(db, targetStr);
-                if (targetResult.error) { reply(targetResult.error); return; }
+                if (targetResult.error) {
+                    Log.w(`[DiceGame][${traceId}] TARGET_ERROR rawTarget=${targetStr}, error=${targetResult.error}`);
+                    reply(targetResult.error);
+                    return;
+                }
 
                 const targetUser = db[targetResult.hash];
+                Log.i(`[DiceGame][${traceId}] TARGET_RESOLVED hash=${targetResult.hash}, name=${targetUser.name}, points=${targetUser.points}`);
 
                 switch (exactCmd) {
                     case "보내기": {
@@ -784,22 +1035,33 @@ function onMessage(msg) {
                     }
                     case "지급":
                         if (isNaN(numValue)) { reply(`[⚠️] 금액을 입력해주세요.`); return; }
+                        appendAuditLog(`[${new Date().toISOString()}][${traceId}] admin=${name}/${hash}, cmd=${exactCmd}, target=${targetUser.name}/${targetResult.hash}, value=${numValue}`);
+                        backupUserData(getAdminBackupReason(exactCmd));
                         targetUser.points += numValue;
                         reply(`[✅ 지급] ${targetUser.name}에게 ${numValue.toLocaleString()}P\n(대상 잔액: ${targetUser.points.toLocaleString()}P)`);
                         break;
                     case "주사위추가":
                         if (isNaN(numValue) || numValue <= 0) { reply(`[⚠️] 횟수를 입력해주세요.`); return; }
-                        if (!isToday(targetUser.lastDice)) targetUser.diceCountToday = 0;
-                        targetUser.diceCountToday = Math.max(0, targetUser.diceCountToday - numValue);
+                        appendAuditLog(`[${new Date().toISOString()}][${traceId}] admin=${name}/${hash}, cmd=${exactCmd}, target=${targetUser.name}/${targetResult.hash}, value=${numValue}`);
+                        backupUserData(getAdminBackupReason(exactCmd));
+                        if (!isToday(targetUser.lastDice)) {
+                            targetUser.diceCountToday = 0;
+                            targetUser.diceBonus = 0;
+                        }
+                        targetUser.diceBonus = (targetUser.diceBonus || 0) + numValue;
                         targetUser.lastDice = now;
-                        reply(`[✅] ${targetUser.name}의 주사위 기회 ${numValue}회 추가`);
+                        reply(`[✅] ${targetUser.name}의 주사위 기회 ${numValue}회 추가 (오늘 최대 ${5 + targetUser.diceBonus}회)`);
                         break;
                     case "주사위초기화":
+                        appendAuditLog(`[${new Date().toISOString()}][${traceId}] admin=${name}/${hash}, cmd=${exactCmd}, target=${targetUser.name}/${targetResult.hash}, value=`);
+                        backupUserData(getAdminBackupReason(exactCmd));
                         targetUser.diceCountToday = 0;
                         targetUser.lastDice = now;
                         reply(`[✅] ${targetUser.name}의 오늘 주사위 횟수 초기화`);
                         break;
                     case "올인초기화":
+                        appendAuditLog(`[${new Date().toISOString()}][${traceId}] admin=${name}/${hash}, cmd=${exactCmd}, target=${targetUser.name}/${targetResult.hash}, value=`);
+                        backupUserData(getAdminBackupReason(exactCmd));
                         targetUser.lastAllIn = 0;
                         reply(`[✅] ${targetUser.name}의 올인 쿨타임 초기화`);
                         break;
@@ -807,13 +1069,24 @@ function onMessage(msg) {
                 break;
             }
         }
+
+        isSuccess = true;
     } catch (e) {
-        Log.e(`오류: ${e.message}\n${e.stack}`);
+        Log.e(`[DiceGame][${traceId}] ERROR ${e.message}\n${e.stack}`);
         reply(`[❌ 시스템 오류] ${e.message}`);
     } finally {
-        saveUserData(db);
+        if (isSuccess) {
+            Log.i(`[DiceGame][${traceId}] SAVE_START current=${name}/${hash}, snapshot=${snapshotUsers(db)}`);
+            saveUserData(db);
+            Log.i(`[DiceGame][${traceId}] SAVE_DONE current=${name}/${hash}`);
+        } else {
+            Log.w(`[DiceGame][${traceId}] SAVE_SKIPPED current=${name}/${hash}, reason=not_completed`);
+        }
     }
 }
+
+bot.removeAllListeners(Event.MESSAGE);
+bot.removeAllListeners(Event.START_COMPILE);
 
 init();
 bot.addListener(Event.START_COMPILE, init);
