@@ -11,7 +11,7 @@
  * .주사위 <금액>  - 조합형 게임 (일일 5회) | 퍼센트 베팅 지원 (예: .주사위 100ㅍ)
  * .올인           - D100 도박 (하루 1회)
  * .랭킹           - 전체 랭킹
- * .보내기 <닉/순위> <금액>
+ * .보내기 <닉/순위> <금액>  - 퍼센트 송금 지원 (예: .보내기 닉네임 50ㅍ)
  * .상점           - 포인트 상점 목록
  * .구매 <아이템명> - 아이템 구매 및 즉시 사용
  * .칭호           - 내 보유 칭호 확인
@@ -420,7 +420,7 @@ function parseBetAmount(raw, points) {
         result.isPercent = true;
         result.pct = parseFloat(pctMatch[1]);
         if (isNaN(result.pct) || result.pct <= 0 || result.pct > 100) {
-            result.error = `[⚠️ 사용법] 퍼센트는 1~100 사이로 입력해주세요.\n예) .주사위 50ㅍ / .주사위 100ㅍ`;
+            result.error = `[⚠️ 사용법] 퍼센트는 1~100 사이로 입력해주세요.\n예) 50ㅍ / 100ㅍ`;
             return result;
         }
         result.bet = Math.floor(points * result.pct / 100);
@@ -1033,11 +1033,11 @@ function handleMessage(msg) {
 
                 const contentStr = msg.content.substring(PREFIX.length).trim();
                 const match = contentStr.match(
-                    /^(보내기|지급|주사위추가|주사위초기화|올인초기화)\s+(?:"([^"]+)"|(\S+))(?:\s+(-?\d+))?$/
+                    /^(보내기|지급|주사위추가|주사위초기화|올인초기화)\s+(?:"([^"]+)"|(\S+))(?:\s+(\S+))?$/
                 );
                 if (!match) {
                     if (cmd === "보내기")
-                        reply(`[⚠️ 사용법] .보내기 <닉네임/순위> <금액>\n* 닉네임에 띄어쓰기가 있으면 "홍 길동"으로 감싸주세요.`);
+                        reply(`[⚠️ 사용법] .보내기 <닉네임/순위> <금액 또는 퍼센트>\n예) .보내기 닉네임 1000 / .보내기 닉네임 50ㅍ\n* 닉네임에 띄어쓰기가 있으면 "홍 길동"으로 감싸주세요.`);
                     else
                         reply(`[⚠️ 사용법]\n.지급 <닉/순위> <금액>\n.주사위추가 <닉/순위> <횟수>\n.주사위초기화 <닉/순위>\n.올인초기화 <닉/순위>`);
                     return;
@@ -1045,8 +1045,9 @@ function handleMessage(msg) {
 
                 const exactCmd = match[1];
                 const targetStr = match[2] || match[3];
-                const numValue = match[4] ? parseInt(match[4], 10) : NaN;
-                Log.i(`[DiceGame][${traceId}] TARGET_REQUEST exactCmd=${exactCmd}, rawTarget=${targetStr}, numValue=${isNaN(numValue) ? "NaN" : numValue}`);
+                const rawNum = match[4];
+                const numValue = rawNum ? parseInt(rawNum, 10) : NaN;
+                Log.i(`[DiceGame][${traceId}] TARGET_REQUEST exactCmd=${exactCmd}, rawTarget=${targetStr}, rawNum=${rawNum || ""}, numValue=${isNaN(numValue) ? "NaN" : numValue}`);
                 const targetResult = resolveTargetUser(db, targetStr);
                 if (targetResult.error) {
                     Log.w(`[DiceGame][${traceId}] TARGET_ERROR rawTarget=${targetStr}, error=${targetResult.error}`);
@@ -1059,17 +1060,28 @@ function handleMessage(msg) {
 
                 switch (exactCmd) {
                     case "보내기": {
-                        if (isNaN(numValue) || numValue <= 0) { reply(`[⚠️] 금액을 1P 이상 입력해주세요.`); return; }
+                        const sendInfo = parseBetAmount(rawNum, user.points);
+                        if (sendInfo.error) { reply(sendInfo.error); return; }
+                        const sendValue = sendInfo.bet;
+                        if (isNaN(sendValue) || sendValue <= 0) {
+                            if (sendInfo.isPercent) {
+                                reply(`[💸 잔액 부족] 보유 포인트가 부족해 ${sendInfo.pct}%를 보낼 수 없습니다.\n보유: ${user.points.toLocaleString()}P`);
+                            } else {
+                                reply(`[⚠️] 금액을 1P 이상 입력해주세요.\n예) .보내기 닉네임 1000 / .보내기 닉네임 50ㅍ`);
+                            }
+                            return;
+                        }
                         if (targetResult.hash === hash) { reply(`[⚠️] 자기 자신에게는 송금할 수 없습니다.`); return; }
-                        if (user.points < numValue) { reply(`[💸 잔액 부족] 보유: ${user.points.toLocaleString()}P`); return; }
+                        if (user.points < sendValue) { reply(`[💸 잔액 부족] 보유: ${user.points.toLocaleString()}P`); return; }
 
-                        const fee = Math.floor(numValue * 0.05); // 수수료 5% 계산
-                        const sendAmount = numValue - fee;       // 실제 보낼 금액
+                        const fee = Math.floor(sendValue * 0.05); // 수수료 5% 계산
+                        const sendAmount = sendValue - fee;       // 실제 보낼 금액
 
-                        user.points -= numValue;
+                        user.points -= sendValue;
                         targetUser.points += sendAmount;
 
-                        reply(`[💸 송금 완료]\n${name} → ${targetUser.name}: ${sendAmount.toLocaleString()}P (수수료 ${fee.toLocaleString()}P 차감)\n(내 잔액: ${user.points.toLocaleString()}P)`);
+                        const pctNote = sendInfo.isPercent ? ` (보유의 ${sendInfo.pct}%)` : "";
+                        reply(`[💸 송금 완료]\n${name} → ${targetUser.name}: ${sendAmount.toLocaleString()}P${pctNote} (수수료 ${fee.toLocaleString()}P 차감)\n(내 잔액: ${user.points.toLocaleString()}P)`);
                         break;
                     }
                     case "지급":
