@@ -8,7 +8,7 @@
  * [명령어]
  * .출석          - 일일 지원금 2,000P + 랜덤 보너스
  * .지갑 / .포인트 - 내 정보 및 잔액 확인
- * .주사위 <금액>  - 조합형 게임 (일일 5회)
+ * .주사위 <금액>  - 조합형 게임 (일일 5회) | 퍼센트 베팅 지원 (예: .주사위 100ㅍ)
  * .올인           - D100 도박 (하루 1회)
  * .랭킹           - 전체 랭킹
  * .보내기 <닉/순위> <금액>
@@ -404,6 +404,32 @@ function init() {
 
 const rollD6 = () => Math.floor(Math.random() * 6) + 1;
 const rollD100 = () => Math.floor(Math.random() * 100) + 1;
+
+/**
+ * 베팅 금액을 해석한다.
+ * - 숫자만 입력하면 그대로 베팅 (예: "1000")
+ * - 숫자 뒤에 ㅍ/%/퍼/퍼센트가 붙으면 보유 포인트의 비율로 베팅 (예: "100ㅍ" → 보유의 100%)
+ * @returns {{ bet: number, isPercent: boolean, pct: number, error: string|null }}
+ */
+function parseBetAmount(raw, points) {
+    const result = { bet: NaN, isPercent: false, pct: NaN, error: null };
+    if (raw === undefined || raw === null || String(raw).trim() === "") return result;
+
+    const pctMatch = String(raw).trim().match(/^(\d+(?:\.\d+)?)(?:%|ㅍ|퍼|퍼센트)$/);
+    if (pctMatch) {
+        result.isPercent = true;
+        result.pct = parseFloat(pctMatch[1]);
+        if (isNaN(result.pct) || result.pct <= 0 || result.pct > 100) {
+            result.error = `[⚠️ 사용법] 퍼센트는 1~100 사이로 입력해주세요.\n예) .주사위 50ㅍ / .주사위 100ㅍ`;
+            return result;
+        }
+        result.bet = Math.floor(points * result.pct / 100);
+        return result;
+    }
+
+    result.bet = parseInt(raw, 10);
+    return result;
+}
 
 function isToday(timestamp) {
     if (!timestamp) return false;
@@ -808,9 +834,18 @@ function handleMessage(msg) {
                     return;
                 }
 
-                const bet = parseInt(args[1]);
+                const betInfo = parseBetAmount(args[1], user.points);
+                if (betInfo.error) {
+                    reply(betInfo.error);
+                    return;
+                }
+                const bet = betInfo.bet;
                 if (isNaN(bet) || bet <= 0) {
-                    reply(`[⚠️ 사용법] .주사위 <금액>`);
+                    if (betInfo.isPercent) {
+                        reply(`[💸 잔액 부족] 보유 포인트가 부족해 ${betInfo.pct}%로 베팅할 수 없습니다.\n보유: ${user.points.toLocaleString()}P`);
+                    } else {
+                        reply(`[⚠️ 사용법] .주사위 <금액> 또는 .주사위 <퍼센트>ㅍ\n예) .주사위 1000 / .주사위 100ㅍ`);
+                    }
                     return;
                 }
                 if (user.points < bet) {
@@ -849,9 +884,13 @@ function handleMessage(msg) {
                     ? `+${win.toLocaleString()}P`
                     : `-${(bet - win).toLocaleString()}P`;
 
+                const betLine = betInfo.isPercent
+                    ? `베팅: ${bet.toLocaleString()}P (보유의 ${betInfo.pct}%)\n`
+                    : "";
+
                 checkAndGrantTitles(user, reply);
                 reply(
-                    `[🎲 ${d.join(", ")}]\n${desc}\n${resultText}\n` +
+                    `[🎲 ${d.join(", ")}]\n${betLine}${desc}\n${resultText}\n` +
                     `잔액: ${user.points.toLocaleString()}P (오늘 ${user.diceCountToday}/${maxDice}회)`
                 );
                 break;
