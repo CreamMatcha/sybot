@@ -58,13 +58,13 @@ const MAX_LOG_CACHE_SIZE = 50;
 const SHOP_ITEMS = {
     "추첨권": {
         name: "🎟️ 추첨권",
-        desc: "고변동 추첨 | 꽝 多, 본전~x2 위주, 잭팟 x50 (EV≈본전)",
+        desc: "무작위 배율 추첨 (잭팟 x50)",
         pct: 5,
         minPrice: 15000
     },
     "프리미엄추첨권": {
         name: "💎 프리미엄 추첨권",
-        desc: "저변동 추첨 | 최소 0.5배 보장(전액 손실 없음), 최대 x3",
+        desc: "꽝 없는 안전 추첨 (최소 0.5배 보장)",
         pct: 10,
         minPrice: 50000
     },
@@ -82,7 +82,7 @@ const SHOP_ITEMS = {
     },
     "복권": {
         name: "🎫 복권",
-        desc: "가격의 0.2~1.8배 랜덤 지급 (저변동, EV≈본전)",
+        desc: "가격의 0.2~1.8배 랜덤 지급",
         pct: 5,
         minPrice: 20000
     },
@@ -672,12 +672,11 @@ function handleMessage(msg) {
 
             /* ============ 상점 ============ */
             case "상점": {
-                let out = `🏪 포인트 상점\n(가격 = 보유 포인트 비율, 내 보유: ${user.points.toLocaleString()}P)\n━━━━━━━━━━━━━━\n`;
+                let out = "🏪 포인트 상점\n━━━━━━━━━━━━━━\n";
                 const keys = Object.keys(SHOP_ITEMS);
                 keys.forEach((key, idx) => {
                     const item = SHOP_ITEMS[key];
-                    const price = getItemPrice(item, user.points);
-                    out += `${idx + 1}. ${item.name} (${price.toLocaleString()}P · 보유 ${item.pct}%)\n  ${item.desc}\n\n`;
+                    out += `${idx + 1}. ${item.name} (보유 ${item.pct}%)\n  ${item.desc}\n\n`;
                 });
                 out += "구매: .구매 <번호> 또는 .<아이템명>\n예) .구매 1 / .추첨권";
                 reply(out.trim());
