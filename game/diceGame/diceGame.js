@@ -1,6 +1,8 @@
 /**
  * @description 서윤봇 (Sybot) 주사위 게임 v5
  * - 포인트 상점 추가 (추첨권, 프리미엄추첨권, 주사위추가, 올인보험, 복권, 슬롯머신)
+ * - 상점 가격을 보유 포인트 비율(%)로 동적 산정 + 배율 재조정(EV≈본전)
+ * - 주사위/보내기 퍼센트 베팅 지원 (예: .주사위 100ㅍ)
  * - 칭호 시스템 추가
  * - 올인 밸런스 조정: 1~25 전부 손실 / 26~75 x1.5 / 76~100 x2
  * @environment MessengerBotR v0.7.41-alpha (GraalJS)
@@ -49,40 +51,88 @@ const recentLogIds = [];
 const MAX_LOG_CACHE_SIZE = 50;
 
 /* ==================== 상점 아이템 정의 ==================== */
-// 가격은 제안가의 10배
+// 가격은 "보유 포인트의 pct%"로 동적 계산 (구매 시점 기준), 단 minPrice 이하로는 내려가지 않음.
+// 배율형 아이템(추첨권/프리미엄/슬롯/복권)의 보상은 모두 동적 가격에 비례하므로
+// 자산이 커져도 기대수익(EV)은 일정하게 유지된다. (목표 EV ≈ 1.0 / 본전)
 
 const SHOP_ITEMS = {
     "추첨권": {
         name: "🎟️ 추첨권",
-        desc: "1배~10배 무작위 추첨 (평균 5.5배)",
-        price: 15000
+        desc: "고변동 추첨 | 꽝 多, 본전~x2 위주, 잭팟 x50 (EV≈본전)",
+        pct: 5,
+        minPrice: 15000
     },
     "프리미엄추첨권": {
         name: "💎 프리미엄 추첨권",
-        desc: "2배~15배 추첨, 꽝 없음",
-        price: 50000
+        desc: "저변동 추첨 | 최소 0.5배 보장(전액 손실 없음), 최대 x3",
+        pct: 10,
+        minPrice: 50000
     },
     "주사위추가": {
         name: "🎲 주사위 추가 1회",
         desc: "오늘 주사위 횟수 1회 추가",
-        price: 3000
+        pct: 1,
+        minPrice: 3000
     },
     "올인보험": {
         name: "🛡️ 올인 보험",
         desc: "다음 올인 실패 시 손실액의 50% 환급 (1회용)",
-        price: 30000
+        pct: 3,
+        minPrice: 30000
     },
     "복권": {
         name: "🎫 복권",
-        desc: "1~50,000P 랜덤 지급",
-        price: 20000
+        desc: "가격의 0.2~1.8배 랜덤 지급 (저변동, EV≈본전)",
+        pct: 5,
+        minPrice: 20000
     },
     "슬롯머신": {
         name: "🎰 슬롯머신",
-        desc: "3칸 슬롯 | 777=x20 / 💎=x10 / 트리플=x5 / 더블=x2",
-        price: 10000
+        desc: "3칸 슬롯 | 777=x20 / 💎=x10 / 트리플=x5 / 더블=x1.8",
+        pct: 7,
+        minPrice: 10000
     }
 };
+
+/**
+ * 보유 포인트 기준 아이템의 실제 구매 가격을 계산한다.
+ * 가격 = max(minPrice, floor(보유 × pct / 100))
+ */
+function getItemPrice(item, points) {
+    const pts = Number(points) || 0;
+    const pctPrice = Math.floor(pts * item.pct / 100);
+    return Math.max(item.minPrice, pctPrice);
+}
+
+/**
+ * 가중치 테이블에서 하나를 추첨한다. table: [{ v, w }, ...]
+ */
+function pickWeighted(table) {
+    let total = 0;
+    for (let i = 0; i < table.length; i++) total += table[i].w;
+    let r = Math.random() * total;
+    for (let i = 0; i < table.length; i++) {
+        r -= table[i].w;
+        if (r < 0) return table[i].v;
+    }
+    return table[table.length - 1].v;
+}
+
+// 추첨권(고변동) / 프리미엄추첨권(저변동) 배율 분포 — 둘 다 E[배율] ≈ 1.0
+const LOTTERY_TABLE = [
+    { v: 0, w: 56.5 },
+    { v: 1, w: 20 },
+    { v: 2, w: 20 },
+    { v: 5, w: 3 },
+    { v: 50, w: 0.5 }
+];
+const PREMIUM_LOTTERY_TABLE = [
+    { v: 0.5, w: 45 },
+    { v: 1, w: 30 },
+    { v: 1.5, w: 18 },
+    { v: 3, w: 7 }
+];
+
 
 /* ==================== 칭호 정의 ==================== */
 
@@ -532,7 +582,7 @@ function runSlotMachine() {
         else if (s[0] === "💎") { mult = 10; desc = "💎 다이아 트리플!"; }
         else { mult = 5; desc = "🔥 트리플!"; }
     } else if (s[0] === s[1] || s[1] === s[2] || s[0] === s[2]) {
-        mult = 2;
+        mult = 1.8;
         desc = "✨ 더블!";
     } else {
         mult = 0;
@@ -622,11 +672,12 @@ function handleMessage(msg) {
 
             /* ============ 상점 ============ */
             case "상점": {
-                let out = "🏪 포인트 상점\n━━━━━━━━━━━━━━\n";
+                let out = `🏪 포인트 상점\n(가격 = 보유 포인트 비율, 내 보유: ${user.points.toLocaleString()}P)\n━━━━━━━━━━━━━━\n`;
                 const keys = Object.keys(SHOP_ITEMS);
                 keys.forEach((key, idx) => {
                     const item = SHOP_ITEMS[key];
-                    out += `${idx + 1}. ${item.name} (${item.price.toLocaleString()}P)\n  ${item.desc}\n\n`;
+                    const price = getItemPrice(item, user.points);
+                    out += `${idx + 1}. ${item.name} (${price.toLocaleString()}P · 보유 ${item.pct}%)\n  ${item.desc}\n\n`;
                 });
                 out += "구매: .구매 <번호> 또는 .<아이템명>\n예) .구매 1 / .추첨권";
                 reply(out.trim());
@@ -657,54 +708,39 @@ function handleMessage(msg) {
                 }
 
                 const item = SHOP_ITEMS[rawItem];
+                const price = getItemPrice(item, user.points);
 
                 if (isToday(user.shopHistory[rawItem])) {
                     reply(`[⏳ 구매 제한]\n'${item.name}'은(는) 하루 1회만 구매 가능합니다.\n자정까지: ${getTimeUntilMidnight()}`);
                     return;
                 }
 
-                if (user.points < item.price) {
-                    reply(`[💸 포인트 부족]\n필요: ${item.price.toLocaleString()}P\n보유: ${user.points.toLocaleString()}P`);
+                if (user.points < price) {
+                    reply(`[💸 포인트 부족]\n필요: ${price.toLocaleString()}P (보유 ${item.pct}%)\n보유: ${user.points.toLocaleString()}P`);
                     return;
                 }
 
-                user.points -= item.price;
+                user.points -= price;
+                const priceStr = `${price.toLocaleString()}P (보유 ${item.pct}%)`;
 
                 if (rawItem === "추첨권") {
-                    const pool = [
-                        1, 1, 1, 1, 1, 1, 1, // 1배: 35%
-                        2, 2, 2, 2, 2,       // 2배: 25%
-                        3, 3, 3,             // 3배: 15%
-                        4, 4,                // 4배: 10%
-                        5, 6, 7, 8, 9, 10    // 5~10배: 각 2.5% (총 15%)
-                    ];
-                    const mult = pool[Math.floor(Math.random() * pool.length)];
-
-                    const gain = item.price * mult;
+                    const mult = pickWeighted(LOTTERY_TABLE);
+                    const gain = Math.floor(price * mult);
                     user.points += gain;
                     updateMaxPoints();
-                    const net = gain - item.price;
+                    const net = gain - price;
                     if (net > user.bestSingleGain) user.bestSingleGain = net;
-                    reply(`🎟️ 추첨 결과: ${mult}배!\n+${gain.toLocaleString()}P 획득 (순이익 ${net >= 0 ? "+" : ""}${net.toLocaleString()}P)\n잔액: ${user.points.toLocaleString()}P`);
+                    const head = mult === 0 ? "💥 꽝..." : (mult >= 50 ? `🎊 잭팟 ${mult}배!!!` : `${mult}배!`);
+                    reply(`🎟️ 추첨 결과: ${head}\n구매가: ${priceStr}\n순이익 ${net >= 0 ? "+" : ""}${net.toLocaleString()}P\n잔액: ${user.points.toLocaleString()}P`);
                 }
                 else if (rawItem === "프리미엄추첨권") {
-                    let mult = 0;
-                    const rand = Math.random();
-
-                    if (rand < 0.90) {
-                        // 90% 확률: 2배 ~ 5배 중 랜덤
-                        mult = Math.floor(Math.random() * 4) + 2;
-                    } else {
-                        // 10% 확률: 6배 ~ 15배 중 랜덤
-                        mult = Math.floor(Math.random() * 10) + 6;
-                    }
-
-                    const gain = item.price * mult;
+                    const mult = pickWeighted(PREMIUM_LOTTERY_TABLE);
+                    const gain = Math.floor(price * mult);
                     user.points += gain;
                     updateMaxPoints();
-                    const net = gain - item.price;
+                    const net = gain - price;
                     if (net > user.bestSingleGain) user.bestSingleGain = net;
-                    reply(`💎 프리미엄 추첨: ${mult}배!\n+${gain.toLocaleString()}P 획득 (순이익 +${net.toLocaleString()}P)\n잔액: ${user.points.toLocaleString()}P`);
+                    reply(`💎 프리미엄 추첨: ${mult}배!\n구매가: ${priceStr}\n순이익 ${net >= 0 ? "+" : ""}${net.toLocaleString()}P\n잔액: ${user.points.toLocaleString()}P`);
                 }
                 else if (rawItem === "주사위추가") {
                     if (!isToday(user.lastDice)) {
@@ -714,32 +750,35 @@ function handleMessage(msg) {
                     user.diceBonus = (user.diceBonus || 0) + 1;
                     user.lastDice = now;
                     const newMax = 5 + user.diceBonus;
-                    reply(`🎲 주사위 기회 1회 추가! (오늘 최대 ${newMax}회)\n잔액: ${user.points.toLocaleString()}P`);
+                    reply(`🎲 주사위 기회 1회 추가! (오늘 최대 ${newMax}회)\n구매가: ${priceStr}\n잔액: ${user.points.toLocaleString()}P`);
                 }
                 else if (rawItem === "올인보험") {
                     if (user.insurance) {
-                        user.points += item.price; // 환불
+                        user.points += price; // 환불
                         reply(`[⚠️] 이미 올인 보험이 적용되어 있습니다. 구매가 취소되었습니다.`);
                         return;
                     }
                     user.insurance = true;
-                    reply(`🛡️ 올인 보험 적용!\n다음 올인 실패 시 손실액의 50%를 돌려받습니다.\n잔액: ${user.points.toLocaleString()}P`);
+                    reply(`🛡️ 올인 보험 적용!\n다음 올인 실패 시 손실액의 50%를 돌려받습니다.\n구매가: ${priceStr}\n잔액: ${user.points.toLocaleString()}P`);
                 }
                 else if (rawItem === "복권") {
-                    const prize = Math.floor(Math.random() * 50000) + 1;
+                    // 가격의 0.2 ~ 1.8배 균등 랜덤 (기대값 = 가격 × 1.0)
+                    const prize = Math.floor(price * (0.2 + Math.random() * 1.6));
                     user.points += prize;
                     updateMaxPoints();
-                    const net = prize - item.price;
-                    reply(`🎫 복권 결과: ${prize.toLocaleString()}P 당첨! (${net >= 0 ? "+" : ""}${net.toLocaleString()}P)\n잔액: ${user.points.toLocaleString()}P`);
+                    const net = prize - price;
+                    if (net > user.bestSingleGain) user.bestSingleGain = net;
+                    reply(`🎫 복권 결과: ${prize.toLocaleString()}P 당첨!\n구매가: ${priceStr}\n순이익 ${net >= 0 ? "+" : ""}${net.toLocaleString()}P\n잔액: ${user.points.toLocaleString()}P`);
                 }
                 else if (rawItem === "슬롯머신") {
                     const result = runSlotMachine();
-                    const gain = Math.floor(item.price * result.mult);
+                    const gain = Math.floor(price * result.mult);
                     user.points += gain;
                     updateMaxPoints();
-                    const net = gain - item.price;
+                    const net = gain - price;
+                    if (net > user.bestSingleGain) user.bestSingleGain = net;
                     const netStr = (net >= 0 ? "+" : "") + net.toLocaleString() + "P";
-                    reply(`🎰 슬롯머신\n[ ${result.s.join(" | ")} ]\n${result.desc} (x${result.mult})\n${netStr}\n잔액: ${user.points.toLocaleString()}P`);
+                    reply(`🎰 슬롯머신\n[ ${result.s.join(" | ")} ]\n${result.desc} (x${result.mult})\n구매가: ${priceStr}\n순이익 ${netStr}\n잔액: ${user.points.toLocaleString()}P`);
                 }
 
                 user.shopHistory[rawItem] = now;
