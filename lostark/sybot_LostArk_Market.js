@@ -220,7 +220,8 @@ bot.addListener(Event.MESSAGE, (msg) => {
     const content = msg.content.trim();
 
     // 유각 조회 (.유각 / .ㅇㄱ / .ㅂㅆㅇㄱ, 뒤에 각인서명을 붙이면 해당 각인만 조회)
-    const engPrefixes = [".유각", ".ㅂㅆㅇㄱ", ".ㅇㄱ"];
+    // 초성 명령어(ㅇㄱ / ㅂㅆㅇㄱ)는 앞에 '.'이 없어도 동작
+    const engPrefixes = [".유각", ".ㅂㅆㅇㄱ", ".ㅇㄱ", "ㅂㅆㅇㄱ", "ㅇㄱ"];
     let engPrefix = null;
     for (const pfx of engPrefixes) {
         if (content === pfx || content.startsWith(pfx + " ")) {
