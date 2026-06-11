@@ -62,6 +62,21 @@ const ENGRAVING_ABBR = {
 };
 
 /**
+ * @description 입력값(줄임말 또는 이름 일부)을 거래소 검색용 각인 이름으로 변환합니다.
+ * @param {string} input 사용자가 입력한 각인서명
+ * @returns {string} ItemName 으로 사용할 검색어
+ */
+function resolveEngravingName(input) {
+    const q = String(input).trim();
+    // 1. 줄임말과 정확히 일치하면 정식 명칭으로 변환
+    for (const fullName in ENGRAVING_ABBR) {
+        if (ENGRAVING_ABBR[fullName] === q) return fullName;
+    }
+    // 2. 그 외에는 입력값 그대로 사용 (API가 부분 일치로 검색)
+    return q;
+}
+
+/**
  * @description JSON 파일을 읽어 순수 JS 객체로 파싱합니다. (Interop 프록시 객체 생성 방지)
  * @param {string} path 파일 경로
  * @return {object|null} 파싱된 객체 또는 실패/파일 없음 시 null 반환
@@ -204,9 +219,18 @@ bot.addListener(Event.MESSAGE, (msg) => {
 
     const content = msg.content.trim();
 
-    // 유각 조회
-    if (content === ".유각" || content === ".ㅇㄱ" || content === ".ㅂㅆㅇㄱ") {
-        logCommand(msg, "유각 시세 조회", "");
+    // 유각 조회 (.유각 / .ㅇㄱ / .ㅂㅆㅇㄱ, 뒤에 각인서명을 붙이면 해당 각인만 조회)
+    const engPrefixes = [".유각", ".ㅂㅆㅇㄱ", ".ㅇㄱ"];
+    let engPrefix = null;
+    for (const pfx of engPrefixes) {
+        if (content === pfx || content.startsWith(pfx + " ")) {
+            engPrefix = pfx;
+            break;
+        }
+    }
+    if (engPrefix !== null) {
+        const engArg = content.slice(engPrefix.length).trim();
+        logCommand(msg, "유각 시세 조회", engArg);
         try {
             const url = "https://developer-lostark.game.onstove.com/markets/items";
 
@@ -224,6 +248,11 @@ bot.addListener(Event.MESSAGE, (msg) => {
                 "PageNo": 1
             };
 
+            // 각인서명이 주어지면 해당 각인만 검색 (줄임말/이름 일부 인식)
+            if (engArg !== "") {
+                body.ItemName = resolveEngravingName(engArg);
+            }
+
             const response = fetchLostarkApi(url, headers, body);
 
             if (response.code === 200) {
@@ -231,7 +260,9 @@ bot.addListener(Event.MESSAGE, (msg) => {
                 const items = data.Items;
 
                 if (!items || items.length === 0) {
-                    msg.reply("현재 검색된 유물 각인서가 없습니다.");
+                    msg.reply(engArg !== ""
+                        ? `'${engArg}'에 해당하는 유물 각인서를 찾지 못했습니다.`
+                        : "현재 검색된 유물 각인서가 없습니다.");
                     return;
                 }
 
