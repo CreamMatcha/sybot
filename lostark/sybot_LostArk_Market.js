@@ -343,7 +343,8 @@ bot.addListener(Event.MESSAGE, (msg) => {
                         gemTypes.push({ label: lv + "작", name: lv + "레벨 작열" });
                     }
                 } else {
-                    msg.reply("⚠️ 올바른 형식이 아닙니다. (예: .보석 7작 / .보석 5)");
+                    // 보석 레벨 형식이 아니면 캐릭터 보석 조회(sybot_LostArk.js)가
+                    // 처리하도록 시세 조회는 조용히 넘긴다.
                     return;
                 }
             }
