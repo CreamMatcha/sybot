@@ -26,6 +26,56 @@ const MAIN_DEFAULT_CONFIG = {
     LOSTARK_API_KEY: "no_API_KEY"
 };
 
+// [설정] 각인서 줄임말 매핑 (정식 명칭 -> 줄임말)
+const ENGRAVING_ABBR = {
+    "결투의 대가": "결대",
+    "구슬동자": "구동",
+    "급소 타격": "급타",
+    "기습의 대가": "기대",
+    "달인의 저력": "달저",
+    "돌격대장": "돌대",
+    "마나의 흐름": "마흐",
+    "마나 효율 증가": "마효증",
+    "바리케이드": "바리",
+    "번개의 분노": "번분",
+    "부러진 뼈": "부뼈",
+    "분쇄의 주먹": "분주",
+    "선수필승": "선필",
+    "속전속결": "속속",
+    "슈퍼 차지": "슈차",
+    "시선 집중": "시집",
+    "실드 관통": "실관",
+    "아드레날린": "아드",
+    "안정된 상태": "안상",
+    "약자 무시": "약무",
+    "에테르 포식자": "에포",
+    "예리한 둔기": "예둔",
+    "위기 모면": "위모",
+    "저주받은 인형": "저받",
+    "정기 흡수": "정흡",
+    "정밀 단도": "정단",
+    "중갑 착용": "중갑",
+    "질량 증가": "질증",
+    "최대 마나 증가": "최마증",
+    "타격의 대가": "타대",
+    "폭발물 전문가": "폭전"
+};
+
+/**
+ * @description 입력값(줄임말 또는 이름 일부)을 거래소 검색용 각인 이름으로 변환합니다.
+ * @param {string} input 사용자가 입력한 각인서명
+ * @returns {string} ItemName 으로 사용할 검색어
+ */
+function resolveEngravingName(input) {
+    const q = String(input).trim();
+    // 1. 줄임말과 정확히 일치하면 정식 명칭으로 변환
+    for (const fullName in ENGRAVING_ABBR) {
+        if (ENGRAVING_ABBR[fullName] === q) return fullName;
+    }
+    // 2. 그 외에는 입력값 그대로 사용 (API가 부분 일치로 검색)
+    return q;
+}
+
 /**
  * @description JSON 파일을 읽어 순수 JS 객체로 파싱합니다. (Interop 프록시 객체 생성 방지)
  * @param {string} path 파일 경로
@@ -169,9 +219,19 @@ bot.addListener(Event.MESSAGE, (msg) => {
 
     const content = msg.content.trim();
 
-    // 유각 조회
-    if (content === ".유각" || content === ".ㅇㄱ" || content === ".ㅂㅆㅇㄱ") {
-        logCommand(msg, "유각 시세 조회", "");
+    // 유각 조회 (.유각 / .ㅇㄱ / .ㅂㅆㅇㄱ, 뒤에 각인서명을 붙이면 해당 각인만 조회)
+    // 초성 명령어(ㅇㄱ / ㅂㅆㅇㄱ)는 앞에 '.'이 없어도 동작
+    const engPrefixes = [".유각", ".ㅂㅆㅇㄱ", ".ㅇㄱ", "ㅂㅆㅇㄱ", "ㅇㄱ"];
+    let engPrefix = null;
+    for (const pfx of engPrefixes) {
+        if (content === pfx || content.startsWith(pfx + " ")) {
+            engPrefix = pfx;
+            break;
+        }
+    }
+    if (engPrefix !== null) {
+        const engArg = content.slice(engPrefix.length).trim();
+        logCommand(msg, "유각 시세 조회", engArg);
         try {
             const url = "https://developer-lostark.game.onstove.com/markets/items";
 
@@ -189,6 +249,11 @@ bot.addListener(Event.MESSAGE, (msg) => {
                 "PageNo": 1
             };
 
+            // 각인서명이 주어지면 해당 각인만 검색 (줄임말/이름 일부 인식)
+            if (engArg !== "") {
+                body.ItemName = resolveEngravingName(engArg);
+            }
+
             const response = fetchLostarkApi(url, headers, body);
 
             if (response.code === 200) {
@@ -196,7 +261,9 @@ bot.addListener(Event.MESSAGE, (msg) => {
                 const items = data.Items;
 
                 if (!items || items.length === 0) {
-                    msg.reply("현재 검색된 유물 각인서가 없습니다.");
+                    msg.reply(engArg !== ""
+                        ? `'${engArg}'에 해당하는 유물 각인서를 찾지 못했습니다.`
+                        : "현재 검색된 유물 각인서가 없습니다.");
                     return;
                 }
 
@@ -211,8 +278,10 @@ bot.addListener(Event.MESSAGE, (msg) => {
                         .replace("유물 ", "")
                         .trim();
 
+                    // 줄임말이 있으면 줄임말로 표기
+                    const displayName = ENGRAVING_ABBR[cleanName] || cleanName;
                     const price = formatNumber(item.CurrentMinPrice);
-                    resultMsg += `\n${cleanName}: ${price}`;
+                    resultMsg += `\n${displayName}: ${price}`;
                 }
 
                 msg.reply(resultMsg.trim());

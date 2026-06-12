@@ -40,6 +40,41 @@ const LOSTARK_DEFAULT_CONFIG = {
     LOSTARK_API_KEY: "no_API_KEY"
 };
 
+// [설정] 각인서 줄임말 매핑 (정식 명칭 -> 줄임말)
+const ENGRAVING_ABBR = {
+    "결투의 대가": "결대",
+    "구슬동자": "구동",
+    "급소 타격": "급타",
+    "기습의 대가": "기대",
+    "달인의 저력": "달저",
+    "돌격대장": "돌대",
+    "마나의 흐름": "마흐",
+    "마나 효율 증가": "마효증",
+    "바리케이드": "바리",
+    "번개의 분노": "번분",
+    "부러진 뼈": "부뼈",
+    "분쇄의 주먹": "분주",
+    "선수필승": "선필",
+    "속전속결": "속속",
+    "슈퍼 차지": "슈차",
+    "시선 집중": "시집",
+    "실드 관통": "실관",
+    "아드레날린": "아드",
+    "안정된 상태": "안상",
+    "약자 무시": "약무",
+    "에테르 포식자": "에포",
+    "예리한 둔기": "예둔",
+    "위기 모면": "위모",
+    "저주받은 인형": "저받",
+    "정기 흡수": "정흡",
+    "정밀 단도": "정단",
+    "중갑 착용": "중갑",
+    "질량 증가": "질증",
+    "최대 마나 증가": "최마증",
+    "타격의 대가": "타대",
+    "폭발물 전문가": "폭전"
+};
+
 /**
  * @description JSON 파일을 읽어 순수 JS 객체로 파싱합니다. (Interop 프록시 객체 생성 방지)
  * @param {string} path 파일 경로
@@ -680,7 +715,9 @@ function fetchIntegratedInfo(charNameRaw) {
                 var eff = eng.ArkPassiveEffects[i];
                 // Level이 0일 때 생략되는 문제 해결 (null/undefined만 체크)
                 if (eff.Name && eff.Level != null) {
-                    engList.push(String(eff.Name).substring(0, 2) + eff.Level);
+                    // 줄임말이 있으면 줄임말로, 없으면 기존처럼 앞 2글자로 표기
+                    var engLabel = ENGRAVING_ABBR[eff.Name] || String(eff.Name).substring(0, 2);
+                    engList.push(engLabel + eff.Level);
                 }
             }
         }
