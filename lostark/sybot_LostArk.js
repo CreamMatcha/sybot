@@ -618,7 +618,8 @@ function fetchTitle(charNameRaw) {
         var json;
         try { json = JSON.parse(res.text || "{}"); } catch (e) { return { ok: false, reason: "PARSE_ERROR" }; }
         if (!json) return { ok: false, reason: "NO_DATA" };
-        return { ok: true, name: charName, title: json.Title || null };
+        var titleText = json.Title ? stripHtml(json.Title) : null;
+        return { ok: true, name: charName, title: titleText || null };
     } catch (e) {
         try { Log.e("[LOA] fetchTitle error: " + e); } catch (_) { }
         return { ok: false, reason: "SYSTEM_ERROR" };
@@ -746,8 +747,11 @@ function fetchIntegratedInfo(charNameRaw) {
 
         // 결과 합치기
         var outLines = ["[beta]"];
-        // 장착 중인 칭호 (없으면 줄 생략)
-        if (p.Title) outLines.push(p.Title);
+        // 장착 중인 칭호 (없으면 줄 생략) - 일부 칭호에 포함된 이모티콘 이미지 태그 제거
+        if (p.Title) {
+            var titleClean = stripHtml(p.Title);
+            if (titleClean) outLines.push(titleClean);
+        }
         outLines.push(line1, "", line2, line3, "", line4, line5, "", gemAvgText, line7, line8, line9);
         var out = outLines.join("\n");
 
