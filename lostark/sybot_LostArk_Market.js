@@ -23,7 +23,8 @@ let config = {};
 
 // [설정] config 관련 설정
 const MAIN_DEFAULT_CONFIG = {
-    LOSTARK_API_KEY: "no_API_KEY"
+    LOSTARK_API_KEY: "no_API_KEY",
+    MARKET_ALERT_ROOMS: [] // .시세알림켜기 명령어로 등록된, 알림을 받을 방 목록
 };
 
 // [설정] 각인서 줄임말 매핑 (정식 명칭 -> 줄임말)
@@ -191,6 +192,131 @@ function fetchLostarkApi(urlStr, headers, bodyObj) {
             code: -1,
             body: e.message
         };
+    }
+}
+
+
+/* ==================== [경매장 시세 알림] ==================== */
+
+// 감시할 아이템 목록 (추가 시 이 배열에 새 항목만 추가하면 됨)
+const WATCH_ITEMS = [
+    {
+        key: "파괴석",
+        aliases: [".파괴석", ".ㅍㄱㅅ"],
+        label: "파괴석 결정",
+        CategoryCode: 50010,
+        ItemTier: 4,
+        ItemName: "파괴석 결정"
+    }
+];
+
+const MARKET_CHECK_INTERVAL_MS = 5 * 60 * 1000;    // 5분마다 시세 체크
+const ALERT_THRESHOLD_PERCENT = 30;                // 전날 평균가 대비 변동 알림 기준 (%)
+const REALERT_THRESHOLD_PERCENT = 10;              // 쿨다운 중에도 재알림을 허용하는 직전 알림가 대비 추가 변동 기준 (%)
+const ALERT_COOLDOWN_MS = 60 * 60 * 1000;          // 동일 아이템 재알림 쿨다운 (1시간)
+
+// 아이템별 마지막 알림 정보 (key -> { price, time }). 재컴파일 시 초기화됨.
+let marketAlertState = {};
+
+/**
+ * @description 경매장 시세 API에서 아이템 1건을 조회합니다.
+ * @param {object} itemDef WATCH_ITEMS의 항목
+ * @returns {{ok: boolean, item: object|null, code: number}}
+ */
+function fetchMarketItem(itemDef) {
+    const url = "https://developer-lostark.game.onstove.com/markets/items";
+
+    const headers = {
+        "accept": "application/json",
+        "authorization": `bearer ${config.LOSTARK_API_KEY}`,
+        "Content-Type": "application/json"
+    };
+
+    const body = {
+        "CategoryCode": itemDef.CategoryCode,
+        "ItemTier": itemDef.ItemTier,
+        "ItemName": itemDef.ItemName,
+        "PageNo": 1
+    };
+
+    const response = fetchLostarkApi(url, headers, body);
+    if (response.code !== 200) {
+        return { ok: false, item: null, code: response.code };
+    }
+
+    const data = JSON.parse(response.body);
+    const item = (data.Items && data.Items.length > 0) ? data.Items[0] : null;
+    return { ok: true, item, code: 200 };
+}
+
+/**
+ * @description 변동률(%) 문자열 포맷 (예: +4.6%, -32.1%)
+ * @param {number} percent
+ * @returns {string}
+ */
+function formatPercent(percent) {
+    const sign = percent >= 0 ? "+" : "";
+    return `${sign}${percent.toFixed(1)}%`;
+}
+
+/**
+ * @description 등록된 모든 알림방에 메시지를 전송합니다.
+ * @param {string} message
+ */
+function sendToAlertRooms(message) {
+    const rooms = config.MARKET_ALERT_ROOMS || [];
+    const JavaThread = java.lang.Thread;
+
+    for (let i = 0; i < rooms.length; i++) {
+        try {
+            bot.send(rooms[i], message);
+        } catch (e) {
+            Log.e(`[시세 알림 전송 실패] ${rooms[i]}: ${e.message}`);
+        }
+        // 카카오톡 도배 방지를 위한 짧은 대기
+        JavaThread.sleep(50);
+    }
+}
+
+/**
+ * @description 감시 아이템들의 시세를 체크하고, 전날 평균가 대비 변동이 기준치 이상이면 알림을 보냅니다.
+ */
+function checkMarketAlerts() {
+    if (!config.MARKET_ALERT_ROOMS || config.MARKET_ALERT_ROOMS.length === 0) return;
+
+    for (let i = 0; i < WATCH_ITEMS.length; i++) {
+        const itemDef = WATCH_ITEMS[i];
+
+        try {
+            const result = fetchMarketItem(itemDef);
+            if (!result.ok || !result.item) continue;
+
+            const item = result.item;
+            if (!item.YDayAvgPrice) continue;
+
+            const changePercent = ((item.RecentPrice - item.YDayAvgPrice) / item.YDayAvgPrice) * 100;
+            if (Math.abs(changePercent) < ALERT_THRESHOLD_PERCENT) continue;
+
+            // 쿨다운 체크: 1시간 내 알림이 있었고, 그 알림가 대비 변동이 적으면 스킵
+            const state = marketAlertState[itemDef.key];
+            const now = Date.now();
+
+            if (state && (now - state.time) < ALERT_COOLDOWN_MS) {
+                const diffFromLast = state.price
+                    ? Math.abs((item.RecentPrice - state.price) / state.price) * 100
+                    : 100;
+                if (diffFromLast < REALERT_THRESHOLD_PERCENT) continue;
+            }
+
+            const trendEmoji = changePercent >= 0 ? "📈" : "📉";
+            const message = `${trendEmoji} [경매장 시세 알림]\n${itemDef.label}\n전날 평균가: ${formatNumber(Math.round(item.YDayAvgPrice))}\n최근 판매가: ${formatNumber(Math.round(item.RecentPrice))} (${formatPercent(changePercent)})`;
+
+            sendToAlertRooms(message);
+            marketAlertState[itemDef.key] = { price: item.RecentPrice, time: now };
+
+        } catch (e) {
+            Log.e(`[시세 알림 체크 오류 - ${itemDef.key}] ${e.stack}`);
+        }
     }
 }
 
@@ -515,4 +641,83 @@ bot.addListener(Event.MESSAGE, (msg) => {
             msg.reply("앗차차! 악세 시세 조회 중 오류가 발생했어요.");
         }
     }
+
+    // 시세 알림방 등록
+    else if (content === ".시세알림켜기") {
+        logCommand(msg, "시세알림 켜기", "");
+        try {
+            if (!config.MARKET_ALERT_ROOMS) config.MARKET_ALERT_ROOMS = [];
+
+            if (!config.MARKET_ALERT_ROOMS.includes(msg.room)) {
+                config.MARKET_ALERT_ROOMS.push(msg.room);
+                safeWriteJson(CONFIG_PATH, config);
+            }
+
+            const watchedLabels = WATCH_ITEMS.map(i => i.label).join(", ");
+            msg.reply(`✅ 이 방에서 경매장 시세 알림을 받습니다.\n(감시 중: ${watchedLabels})`);
+        } catch (e) {
+            Log.e(`[Script Error - 시세알림켜기] ${e.stack}`);
+            msg.reply("앗차차! 시세 알림 등록 중 오류가 발생했어요.");
+        }
+    }
+
+    // 시세 알림방 해제
+    else if (content === ".시세알림끄기") {
+        logCommand(msg, "시세알림 끄기", "");
+        try {
+            if (config.MARKET_ALERT_ROOMS) {
+                config.MARKET_ALERT_ROOMS = config.MARKET_ALERT_ROOMS.filter(r => r !== msg.room);
+                safeWriteJson(CONFIG_PATH, config);
+            }
+            msg.reply("🔕 이 방에서 경매장 시세 알림을 중지합니다.");
+        } catch (e) {
+            Log.e(`[Script Error - 시세알림끄기] ${e.stack}`);
+            msg.reply("앗차차! 시세 알림 해제 중 오류가 발생했어요.");
+        }
+    }
+
+    // 감시 아이템 시세 조회 (알림 등록 여부와 무관하게 항상 현재 시세를 보여줌)
+    else if (WATCH_ITEMS.some(i => i.aliases.includes(content))) {
+        const matchedItem = WATCH_ITEMS.find(i => i.aliases.includes(content));
+        logCommand(msg, "시세 조회", matchedItem.key);
+        try {
+            const result = fetchMarketItem(matchedItem);
+
+            if (!result.ok) {
+                if (result.code === 401) {
+                    msg.reply("⚠️ API 키가 만료되었거나 올바르지 않습니다.");
+                } else {
+                    Log.e(`[Lostark API] Error: ${result.code}`);
+                    msg.reply(`❌ 거래소 조회 실패 (코드: ${result.code})`);
+                }
+                return;
+            }
+
+            if (!result.item) {
+                msg.reply(`현재 검색된 ${matchedItem.label} 매물이 없습니다.`);
+                return;
+            }
+
+            const item = result.item;
+            let resultMsg = `${matchedItem.label} 시세\n현재 최저가: ${formatNumber(item.CurrentMinPrice)}`;
+
+            if (item.RecentPrice != null) {
+                resultMsg += `\n최근 판매가: ${formatNumber(Math.round(item.RecentPrice))}`;
+            }
+            if (item.YDayAvgPrice) {
+                const changePercent = ((item.RecentPrice - item.YDayAvgPrice) / item.YDayAvgPrice) * 100;
+                resultMsg += `\n전날 평균가: ${formatNumber(Math.round(item.YDayAvgPrice))} (${formatPercent(changePercent)})`;
+            }
+
+            msg.reply(resultMsg);
+
+        } catch (e) {
+            Log.e(`[Script Error - Market Watch] ${e.stack}`);
+            msg.reply("앗차차! 시세 조회 중 오류가 발생했어요.");
+        }
+    }
 });
+
+// 경매장 시세 알림 주기 체크 시작 (5분 간격)
+checkMarketAlerts();
+setInterval(checkMarketAlerts, MARKET_CHECK_INTERVAL_MS);
