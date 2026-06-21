@@ -217,7 +217,7 @@ const WATCH_ITEMS = [
     }
 ];
 
-const MARKET_CHECK_INTERVAL_MS = 5 * 60 * 1000;    // 5분마다 시세 체크
+const MARKET_CHECK_INTERVAL_MS = 3 * 60 * 1000;    // 3분마다 시세 체크
 const ALERT_THRESHOLD_PERCENT = 30;                // 전날 평균가 대비 변동 알림 기준 (%)
 const REALERT_THRESHOLD_PERCENT = 10;              // 쿨다운 중에도 재알림을 허용하는 직전 알림가 대비 추가 변동 기준 (%)
 const ALERT_COOLDOWN_MS = 60 * 60 * 1000;          // 동일 아이템 재알림 쿨다운 (1시간)
@@ -725,6 +725,6 @@ bot.addListener(Event.MESSAGE, (msg) => {
     }
 });
 
-// 경매장 시세 알림 주기 체크 시작 (5분 간격)
+// 경매장 시세 알림 주기 체크 시작 (3분 간격)
 checkMarketAlerts();
 setInterval(checkMarketAlerts, MARKET_CHECK_INTERVAL_MS);
