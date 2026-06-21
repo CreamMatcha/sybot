@@ -296,6 +296,10 @@ function checkMarketAlerts() {
 
         try {
             const result = fetchMarketItem(itemDef);
+
+            // [TEST] 5분 주기 시세 체크 동작 확인용 로그 (성공/실패 모두 기록)
+            Log.i(`[시세체크 TEST] ${new Date().toLocaleTimeString()} - ${itemDef.key}: ok=${result.ok}, code=${result.code}, RecentPrice=${result.item ? result.item.RecentPrice : "N/A"}`);
+
             if (!result.ok || !result.item) continue;
 
             const item = result.item;
