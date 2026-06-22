@@ -808,7 +808,7 @@ function fetchIntegratedInfo(charNameRaw) {
         outLines.push(line1, "", line2, line3, "", line4, line5, "", gemAvgText, line7, line8, line9);
         var out = outLines.join("\n");
 
-        return { ok: true, content: out.trim(), itemLevel: itemLv };
+        return { ok: true, content: out.trim(), itemLevel: itemLv, className: p.CharacterClassName };
 
     } catch (e) {
         Log.e("[LOA] Info parse error: " + e);
@@ -1702,6 +1702,52 @@ function simplifyEquipName(text) {
     return tokens[0] + " " + tokens[tokens.length - 1];
 }
 
+// 클래스별 무기 기본명 (마지막 단어 파싱이 부정확한 경우가 많아 클래스 기준으로 직접 매칭)
+var CLASS_WEAPON_NAME = {
+    "버서커": "대검",
+    "디스트로이어": "망치",
+    "워로드": "랜스",
+    "홀리나이트": "한손검",
+    "슬레이어": "대검",
+    "발키리": "한손검",
+    "배틀마스터": "건틀릿",
+    "인파이터": "헤비 건틀릿",
+    "기공사": "기공패",
+    "창술사": "창",
+    "스트라이커": "건틀릿",
+    "브레이커": "헤비 건틀릿",
+    "데빌헌터": "총",
+    "블래스터": "런처",
+    "호크아이": "활",
+    "스카우터": "서브 머신건",
+    "건슬링어": "총",
+    "아르카나": "마법 덱",
+    "서머너": "스태프",
+    "바드": "하프",
+    "소서리스": "롱 스태프",
+    "데모닉": "데모닉웨폰",
+    "블레이드": "검",
+    "리퍼": "대거",
+    "소울이터": "데스사이드",
+    "도화가": "붓",
+    "기상술사": "우산",
+    "환수사": "두루마리",
+    "차원술사": "시계",
+    "가디언나이트": "할버드"
+};
+
+// 무기는 클래스 매칭 우선, 매칭 실패 시(또는 무기가 아니면) 기존 마지막 단어 파싱 방식 사용
+function getEquipDisplayName(it, className) {
+    if (it.type === "무기") {
+        var weaponName = CLASS_WEAPON_NAME[className];
+        if (weaponName) {
+            var enhance = String(it.text).trim().split(/\s+/)[0];
+            return enhance + " " + weaponName;
+        }
+    }
+    return simplifyEquipName(it.text);
+}
+
 function renderEquipmentView(model) {
     var sumQuality = 0;
     var qualityCount = 0;
@@ -1712,12 +1758,12 @@ function renderEquipmentView(model) {
     var avgQuality = qualityCount ? (Math.round((sumQuality / qualityCount) * 10) / 10).toFixed(1) : "?";
 
     var nameLine = model.name + (model.charLevel ? "(" + model.charLevel + ")" : "");
-    var out = [nameLine + "의 장비 (평균품질 " + avgQuality + ")", ""];
+    var out = [nameLine + "의 장비: " + avgQuality, ""];
     for (var j = 0; j < model.items.length; j++) {
         var it = model.items[j];
         var lv = (it.itemLevel != null) ? it.itemLevel : "?";
         var qq = (it.quality != null) ? it.quality : "?";
-        out.push("[" + it.type + "] " + simplifyEquipName(it.text) + " (" + lv + "/" + qq + ")");
+        out.push(getEquipDisplayName(it, model.className) + "(" + lv + ") : " + qq);
     }
     return out.join("\n");
 }
@@ -2170,6 +2216,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
 
             if (rEquip && rEquip.ok) {
                 rEquip.charLevel = fetchProfileItemLevel(charEquip);
+                rEquip.className = fetchProfileClassName(charEquip);
                 msg.reply(renderEquipmentView(rEquip));
             } else {
                 var reasonEquip = (rEquip && rEquip.reason) ? rEquip.reason : "UNKNOWN";
@@ -2305,6 +2352,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
                     var rEquipAfterInfo = fetchEquipmentSummary(charInfo);
                     if (rEquipAfterInfo && rEquipAfterInfo.ok) {
                         rEquipAfterInfo.charLevel = rInfo.itemLevel;
+                        rEquipAfterInfo.className = rInfo.className;
                         msg.reply(renderEquipmentView(rEquipAfterInfo));
                     }
                 } catch (e2) {
