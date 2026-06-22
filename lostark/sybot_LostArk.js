@@ -1806,14 +1806,26 @@ function fetchCollectibles(charNameRaw) {
     return { ok: true, name: charName, items: items };
 }
 
+// 한글 등 코드 0xFF를 넘는 문자는 2칸, 그 외(영문/숫자/공백 등)는 1칸으로 계산한 표시 폭
+function getDisplayWidth(str) {
+    var width = 0;
+    for (var i = 0; i < str.length; i++) {
+        width += str.charCodeAt(i) > 0xFF ? 2 : 1;
+    }
+    return width;
+}
+
 function renderCollectiblesView(model) {
     var rows = [];
     var sumPct = 0;
+    var maxLabelWidth = 0;
     for (var i = 0; i < model.items.length; i++) {
         var it = model.items[i];
         var pct = it.maxPoint > 0 ? (it.point / it.maxPoint * 100) : 0;
         sumPct += pct;
-        rows.push({ type: it.type, point: it.point, maxPoint: it.maxPoint, pct: pct });
+        var label = (pct >= 100 ? "✓ " : "") + it.type;
+        maxLabelWidth = Math.max(maxLabelWidth, getDisplayWidth(label));
+        rows.push({ label: label, point: it.point, maxPoint: it.maxPoint, pct: pct });
     }
 
     // 달성률 낮은 순 정렬 (챙겨야 할 항목을 먼저 보여줌)
@@ -1824,8 +1836,9 @@ function renderCollectiblesView(model) {
     var out = [model.name + "의 내실 (" + avgPct.toFixed(0) + "%)", "━━━━━━━━━━━━━━"];
     for (var j = 0; j < rows.length; j++) {
         var r = rows[j];
-        var mark = r.pct >= 100 ? "✓ " : "";
-        out.push(mark + r.type + " " + r.point + "/" + r.maxPoint + "(" + r.pct.toFixed(0) + "%)");
+        // 가장 긴 라벨 기준으로 칸을 맞추고 최소 2칸은 띄움
+        var pad = " ".repeat(maxLabelWidth - getDisplayWidth(r.label) + 2);
+        out.push(r.label + pad + r.point + "/" + r.maxPoint + " (" + r.pct.toFixed(0) + "%)");
     }
     return out.join("\n");
 }
