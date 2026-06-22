@@ -1839,7 +1839,7 @@ function renderCollectiblesView(model) {
 
     var avgPct = rows.length ? (sumPct / rows.length) : 0;
 
-    var out = [model.name + "의 내실 (" + avgPct.toFixed(0) + "%)", "━━━━━━━━━━━━━━"];
+    var out = [model.name + "의 내실 (" + avgPct.toFixed(0) + "%)", ""];
     for (var j = 0; j < rows.length; j++) {
         var r = rows[j];
         // 값(value)을 오른쪽 끝에 맞춰서 모든 줄의 끝이 같은 위치에서 끝나도록 함
