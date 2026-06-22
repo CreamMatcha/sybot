@@ -533,7 +533,7 @@ bot.addListener(Event.MESSAGE, (msg) => {
     }
 
     // 로아허브 바로가기
-    if (/^\.(로아허브|ㄹㅇㅎㅂ|ㅎㅂ|허브)$/.test(content)) {
+    if (/^(?:\.(?:로아허브|허브)|\.?(?:ㄹㅇㅎㅂ|ㅎㅂ))$/.test(content)) {
         logCommand(msg, "로아허브 바로가기");
 
         // 카카오링크 로그인이 안 되어있으면 시도

@@ -202,7 +202,7 @@ function fetchLostarkApi(urlStr, headers, bodyObj) {
 const WATCH_ITEMS = [
     {
         key: "파괴석",
-        aliases: [".파괴석", ".ㅍㄱㅅ"],
+        aliases: [".파괴석", ".ㅍㄱㅅ", "ㅍㄱㅅ"],
         label: "파괴석 결정",
         CategoryCode: 50010,
         ItemTier: 4,
@@ -210,7 +210,7 @@ const WATCH_ITEMS = [
     },
     {
         key: "재봉술",
-        aliases: [".재봉술", ".ㅈㅂㅅ"],
+        aliases: [".재봉술", ".ㅈㅂㅅ", "ㅈㅂㅅ"],
         label: "장인의 재봉술 : 4단계",
         CategoryCode: 50020,
         ItemName: "장인의 재봉술 : 4단계"

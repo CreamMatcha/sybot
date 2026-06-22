@@ -2313,8 +2313,8 @@ bot.addListener(Event.MESSAGE, function (msg) {
         return;
     }
 
-    // 내실 조회 (.내실, .ㄴㅅ)
-    var mColl = content.match(/^(?:\.내실|\.ㄴㅅ)\s+(\S+)$/);
+    // 내실 조회 (.내실, .ㄴㅅ, ㄴㅅ)
+    var mColl = content.match(/^(?:\.내실|\.?ㄴㅅ)\s+(\S+)$/);
     if (mColl) {
         var charColl = mColl[1];
         logCommand(msg, "내실 조회", charColl);
