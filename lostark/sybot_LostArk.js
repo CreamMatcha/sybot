@@ -1807,10 +1807,13 @@ function fetchCollectibles(charNameRaw) {
 }
 
 // 한글 등 코드 0xFF를 넘는 문자는 2칸, 그 외(영문/숫자/공백 등)는 1칸으로 계산한 표시 폭
+// 체크마크(✓)는 카카오톡 폰트에서 한글보다 더 넓게 보여서 3칸으로 계산
 function getDisplayWidth(str) {
     var width = 0;
     for (var i = 0; i < str.length; i++) {
-        width += str.charCodeAt(i) > 0xFF ? 2 : 1;
+        var code = str.charCodeAt(i);
+        if (code === 0x2713) width += 3;
+        else width += code > 0xFF ? 2 : 1;
     }
     return width;
 }
