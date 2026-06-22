@@ -1606,6 +1606,85 @@ function fetchAccessories(charNameRaw) {
 }
 
 // ==========================================
+// 장비창 조회 (무기/투구/어깨/상의/하의/장갑) - .장비
+// ==========================================
+var EQUIP_TYPE_ORDER = { "무기": 1, "투구": 2, "어깨": 3, "상의": 4, "하의": 5, "장갑": 6 };
+
+// Tooltip JSON에서 지정한 type(NameTagBox, ItemTitle 등)을 가진 Element의 value를 반환
+function findTooltipElementValueByType(tipObj, typeName) {
+    if (!tipObj) return null;
+    var keys = Object.keys(tipObj);
+    for (var i = 0; i < keys.length; i++) {
+        var el = tipObj[keys[i]];
+        if (el && el.type === typeName) return el.value;
+    }
+    return null;
+}
+
+function fetchEquipmentSummary(charNameRaw) {
+    var charName = String(charNameRaw);
+    var url = LOSTARK_BASE + "/armories/characters/" + charName + "/equipment";
+
+    var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
+    if (!res.ok) {
+        if (res.code === 404) return { ok: false, reason: "NOT_FOUND" };
+        return { ok: false, reason: "HTTP_" + res.code };
+    }
+
+    var arr;
+    try {
+        arr = JSON.parse(res.text);
+    } catch (e) {
+        return { ok: false, reason: "PARSE_ERROR" };
+    }
+
+    if (!arr || arr.length === 0) return { ok: false, reason: "NO_EQUIP" };
+
+    var items = [];
+    for (var i = 0; i < arr.length; i++) {
+        var it = arr[i];
+        if (!it || EQUIP_TYPE_ORDER[it.Type] == null) continue;
+
+        var lineText = it.Name || "";
+        var quality = null;
+
+        try {
+            var tooltip = JSON.parse(it.Tooltip);
+
+            // "+23 운명의 전율 어깨장식" 형태 (강화단계 포함 이름)
+            var nameTagVal = findTooltipElementValueByType(tooltip, "NameTagBox");
+            if (nameTagVal) lineText = stripHtml(nameTagVal);
+
+            // 품질(qualityValue)
+            var itemTitleVal = findTooltipElementValueByType(tooltip, "ItemTitle");
+            if (itemTitleVal && itemTitleVal.qualityValue != null) {
+                quality = itemTitleVal.qualityValue;
+            }
+        } catch (e) {
+            Log.e("[LOA] 장비 Tooltip 파싱 실패 (" + it.Name + "): " + e);
+        }
+
+        items.push({ type: it.Type, text: lineText, quality: quality });
+    }
+
+    if (items.length === 0) return { ok: false, reason: "NO_EQUIP" };
+
+    items.sort(function (a, b) { return EQUIP_TYPE_ORDER[a.type] - EQUIP_TYPE_ORDER[b.type]; });
+
+    return { ok: true, name: charName, items: items };
+}
+
+function renderEquipmentView(model) {
+    var out = [model.name + "의 장비\n"];
+    for (var i = 0; i < model.items.length; i++) {
+        var it = model.items[i];
+        var q = (it.quality != null) ? it.quality : "?";
+        out.push(it.text + "(" + q + ")");
+    }
+    return out.join("\n").trim();
+}
+
+// ==========================================
 // 직업 시너지 데이터 및 처리 함수
 // ==========================================
 var SYNERGY_DATA = [
@@ -2042,6 +2121,31 @@ bot.addListener(Event.MESSAGE, function (msg) {
         return;
     }
 
+    // 장비창 조회 (.장비)
+    var mEquip = content.match(/^\.장비\s+(\S+)$/);
+    if (mEquip) {
+        var charEquip = mEquip[1];
+        logCommand(msg, "장비 조회", charEquip);
+
+        try {
+            var rEquip = fetchEquipmentSummary(charEquip);
+
+            if (rEquip && rEquip.ok) {
+                msg.reply(renderEquipmentView(rEquip));
+            } else {
+                var reasonEquip = (rEquip && rEquip.reason) ? rEquip.reason : "UNKNOWN";
+                if (reasonEquip === "NO_EQUIP") {
+                    msg.reply("해당 캐릭터는 장비 정보를 불러올 수 없습니다.");
+                } else {
+                    handleApiError(msg, reasonEquip, "장비 조회", charEquip);
+                }
+            }
+        } catch (e) {
+            handleApiError(msg, e, "장비 조회", charEquip);
+        }
+        return;
+    }
+
     // 시너지 조회
     // .시너지, .ㅅㄴㅈ, ㅅㄴㅈ 와 매칭되며 뒤에 검색어가 올 수 있음
     var mSynergy = content.match(/^(?:\.시너지|\.?ㅅㄴㅈ)(?:\s+(.+))?$/);
@@ -2156,6 +2260,16 @@ bot.addListener(Event.MESSAGE, function (msg) {
             var rInfo = fetchIntegratedInfo(charInfo);
             if (rInfo.ok) {
                 msg.reply(rInfo.content);
+
+                // 정보 조회 성공 시 장비 정보도 이어서 출력
+                try {
+                    var rEquipAfterInfo = fetchEquipmentSummary(charInfo);
+                    if (rEquipAfterInfo && rEquipAfterInfo.ok) {
+                        msg.reply(renderEquipmentView(rEquipAfterInfo));
+                    }
+                } catch (e2) {
+                    Log.e("[LOA] 통합 정보 조회 - 장비 부가 조회 실패: " + e2);
+                }
             } else {
                 handleApiError(msg, rInfo.reason, "통합 정보 조회", charInfo);
             }
