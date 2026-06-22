@@ -1674,6 +1674,13 @@ function fetchEquipmentSummary(charNameRaw) {
     return { ok: true, name: charName, items: items };
 }
 
+// "+23 운명의 전율 어깨장식" -> "+23 어깨장식" (앞 강화단계 + 마지막 단어인 기본 부위명만 남김)
+function simplifyEquipName(text) {
+    var tokens = String(text).trim().split(/\s+/);
+    if (tokens.length <= 2) return tokens.join(" ");
+    return tokens[0] + " " + tokens[tokens.length - 1];
+}
+
 function renderEquipmentView(model) {
     var sumQuality = 0;
     var qualityCount = 0;
@@ -1683,13 +1690,11 @@ function renderEquipmentView(model) {
     }
     var avgQuality = qualityCount ? (Math.round((sumQuality / qualityCount) * 10) / 10).toFixed(1) : "?";
 
-    var out = [];
-    out.push(model.name + "의 장비 (평균 품질 " + avgQuality + ")");
-    out.push("━━━━━━━━━━━━━━");
+    var out = [model.name + "의 장비 (" + avgQuality + ")", ""];
     for (var j = 0; j < model.items.length; j++) {
         var it = model.items[j];
         var qq = (it.quality != null) ? it.quality : "?";
-        out.push("[" + it.type + "] " + it.text + " (" + qq + ")");
+        out.push("[" + it.type + "] " + simplifyEquipName(it.text) + " (" + qq + ")");
     }
     return out.join("\n");
 }
