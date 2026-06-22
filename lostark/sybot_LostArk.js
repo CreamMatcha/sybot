@@ -1675,13 +1675,23 @@ function fetchEquipmentSummary(charNameRaw) {
 }
 
 function renderEquipmentView(model) {
-    var out = [model.name + "의 장비\n"];
+    var sumQuality = 0;
+    var qualityCount = 0;
     for (var i = 0; i < model.items.length; i++) {
-        var it = model.items[i];
-        var q = (it.quality != null) ? it.quality : "?";
-        out.push(it.text + "(" + q + ")");
+        var q = model.items[i].quality;
+        if (q != null) { sumQuality += q; qualityCount++; }
     }
-    return out.join("\n").trim();
+    var avgQuality = qualityCount ? (Math.round((sumQuality / qualityCount) * 10) / 10).toFixed(1) : "?";
+
+    var out = [];
+    out.push(model.name + "의 장비 (평균 품질 " + avgQuality + ")");
+    out.push("━━━━━━━━━━━━━━");
+    for (var j = 0; j < model.items.length; j++) {
+        var it = model.items[j];
+        var qq = (it.quality != null) ? it.quality : "?";
+        out.push("[" + it.type + "] " + it.text + " (" + qq + ")");
+    }
+    return out.join("\n");
 }
 
 // ==========================================
