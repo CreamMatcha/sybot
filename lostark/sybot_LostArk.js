@@ -639,6 +639,22 @@ function fetchProfileClassName(charNameRaw) {
     }
 }
 
+// 프로필에서 캐릭터 아이템 레벨만 빠르게 가져오기
+function fetchProfileItemLevel(charNameRaw) {
+    try {
+        var charName = String(charNameRaw);
+        var url = LOSTARK_BASE + "/armories/characters/" + charName + "/profiles";
+        var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
+        if (!res.ok) return null;
+        var js = JSON.parse(res.text || "{}");
+        if (js && js.ItemAvgLevel) return String(js.ItemAvgLevel).replace(/,/g, "");
+        return null;
+    } catch (e) {
+        try { Log.e("[LOA] fetchProfileItemLevel error: " + e); } catch (_) { }
+        return null;
+    }
+}
+
 
 // 장착 중인 칭호만 빠르게 가져오기
 function fetchTitle(charNameRaw) {
@@ -792,7 +808,7 @@ function fetchIntegratedInfo(charNameRaw) {
         outLines.push(line1, "", line2, line3, "", line4, line5, "", gemAvgText, line7, line8, line9);
         var out = outLines.join("\n");
 
-        return { ok: true, content: out.trim() };
+        return { ok: true, content: out.trim(), itemLevel: itemLv };
 
     } catch (e) {
         Log.e("[LOA] Info parse error: " + e);
@@ -1647,6 +1663,7 @@ function fetchEquipmentSummary(charNameRaw) {
 
         var lineText = it.Name || "";
         var quality = null;
+        var itemLevel = null;
 
         try {
             var tooltip = JSON.parse(it.Tooltip);
@@ -1655,16 +1672,20 @@ function fetchEquipmentSummary(charNameRaw) {
             var nameTagVal = findTooltipElementValueByType(tooltip, "NameTagBox");
             if (nameTagVal) lineText = stripHtml(nameTagVal);
 
-            // 품질(qualityValue)
+            // 품질(qualityValue) / 아이템 레벨(leftStr2: "아이템 레벨 1800 (티어 4)")
             var itemTitleVal = findTooltipElementValueByType(tooltip, "ItemTitle");
-            if (itemTitleVal && itemTitleVal.qualityValue != null) {
-                quality = itemTitleVal.qualityValue;
+            if (itemTitleVal) {
+                if (itemTitleVal.qualityValue != null) quality = itemTitleVal.qualityValue;
+                if (itemTitleVal.leftStr2) {
+                    var mLv = stripHtml(itemTitleVal.leftStr2).match(/아이템\s*레벨\s*([0-9,]+)/);
+                    if (mLv) itemLevel = mLv[1].replace(/,/g, "");
+                }
             }
         } catch (e) {
             Log.e("[LOA] 장비 Tooltip 파싱 실패 (" + it.Name + "): " + e);
         }
 
-        items.push({ type: it.Type, text: lineText, quality: quality });
+        items.push({ type: it.Type, text: lineText, quality: quality, itemLevel: itemLevel });
     }
 
     if (items.length === 0) return { ok: false, reason: "NO_EQUIP" };
@@ -1690,11 +1711,13 @@ function renderEquipmentView(model) {
     }
     var avgQuality = qualityCount ? (Math.round((sumQuality / qualityCount) * 10) / 10).toFixed(1) : "?";
 
-    var out = [model.name + "의 장비 (" + avgQuality + ")", ""];
+    var nameLine = model.name + (model.charLevel ? "(" + model.charLevel + ")" : "");
+    var out = [nameLine + "의 장비 (평균품질 " + avgQuality + ")", ""];
     for (var j = 0; j < model.items.length; j++) {
         var it = model.items[j];
+        var lv = (it.itemLevel != null) ? it.itemLevel : "?";
         var qq = (it.quality != null) ? it.quality : "?";
-        out.push("[" + it.type + "] " + simplifyEquipName(it.text) + " (" + qq + ")");
+        out.push("[" + it.type + "] " + simplifyEquipName(it.text) + " (" + lv + "/" + qq + ")");
     }
     return out.join("\n");
 }
@@ -2146,6 +2169,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
             var rEquip = fetchEquipmentSummary(charEquip);
 
             if (rEquip && rEquip.ok) {
+                rEquip.charLevel = fetchProfileItemLevel(charEquip);
                 msg.reply(renderEquipmentView(rEquip));
             } else {
                 var reasonEquip = (rEquip && rEquip.reason) ? rEquip.reason : "UNKNOWN";
@@ -2280,6 +2304,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
                 try {
                     var rEquipAfterInfo = fetchEquipmentSummary(charInfo);
                     if (rEquipAfterInfo && rEquipAfterInfo.ok) {
+                        rEquipAfterInfo.charLevel = rInfo.itemLevel;
                         msg.reply(renderEquipmentView(rEquipAfterInfo));
                     }
                 } catch (e2) {
