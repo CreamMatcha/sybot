@@ -1819,13 +1819,16 @@ function renderCollectiblesView(model) {
     var rows = [];
     var sumPct = 0;
     var maxLabelWidth = 0;
+    var maxValueWidth = 0;
     for (var i = 0; i < model.items.length; i++) {
         var it = model.items[i];
         var pct = it.maxPoint > 0 ? (it.point / it.maxPoint * 100) : 0;
         sumPct += pct;
         var label = (pct >= 100 ? "✓ " : "") + it.type;
+        var value = it.point + "/" + it.maxPoint + " (" + pct.toFixed(0) + "%)";
         maxLabelWidth = Math.max(maxLabelWidth, getDisplayWidth(label));
-        rows.push({ label: label, point: it.point, maxPoint: it.maxPoint, pct: pct });
+        maxValueWidth = Math.max(maxValueWidth, getDisplayWidth(value));
+        rows.push({ label: label, value: value, pct: pct });
     }
 
     // 달성률 낮은 순 정렬 (챙겨야 할 항목을 먼저 보여줌)
@@ -1836,9 +1839,9 @@ function renderCollectiblesView(model) {
     var out = [model.name + "의 내실 (" + avgPct.toFixed(0) + "%)", "━━━━━━━━━━━━━━"];
     for (var j = 0; j < rows.length; j++) {
         var r = rows[j];
-        // 가장 긴 라벨 기준으로 칸을 맞추고 최소 2칸은 띄움
-        var pad = " ".repeat(maxLabelWidth - getDisplayWidth(r.label) + 2);
-        out.push(r.label + pad + r.point + "/" + r.maxPoint + " (" + r.pct.toFixed(0) + "%)");
+        // 값(value)을 오른쪽 끝에 맞춰서 모든 줄의 끝이 같은 위치에서 끝나도록 함
+        var pad = " ".repeat(maxLabelWidth - getDisplayWidth(r.label) + 2 + maxValueWidth - getDisplayWidth(r.value));
+        out.push(r.label + pad + r.value);
     }
     return out.join("\n");
 }
