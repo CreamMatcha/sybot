@@ -1736,16 +1736,20 @@ var CLASS_WEAPON_NAME = {
     "가디언나이트": "할버드"
 };
 
-// 무기는 클래스 매칭 우선, 매칭 실패 시(또는 무기가 아니면) 기존 마지막 단어 파싱 방식 사용
+// 방어구는 실제 아이템명과 무관하게 슬롯 기준 고정 명칭 사용
+var EQUIP_TYPE_DISPLAY_NAME = { "투구": "투구", "어깨": "견갑", "상의": "상의", "하의": "하의", "장갑": "장갑" };
+
+// 무기는 클래스 매칭 우선, 매칭 실패 시 기존 마지막 단어 파싱 방식으로 폴백. 방어구는 슬롯 고정 명칭.
 function getEquipDisplayName(it, className) {
+    var enhance = String(it.text).trim().split(/\s+/)[0];
+
     if (it.type === "무기") {
         var weaponName = CLASS_WEAPON_NAME[className];
-        if (weaponName) {
-            var enhance = String(it.text).trim().split(/\s+/)[0];
-            return enhance + " " + weaponName;
-        }
+        if (weaponName) return enhance + " " + weaponName;
+        return simplifyEquipName(it.text);
     }
-    return simplifyEquipName(it.text);
+
+    return enhance + " " + EQUIP_TYPE_DISPLAY_NAME[it.type];
 }
 
 function renderEquipmentView(model) {
@@ -1758,7 +1762,7 @@ function renderEquipmentView(model) {
     var avgQuality = qualityCount ? (Math.round((sumQuality / qualityCount) * 10) / 10).toFixed(1) : "?";
 
     var nameLine = model.name + (model.charLevel ? "(" + model.charLevel + ")" : "");
-    var out = [nameLine + "의 장비: " + avgQuality, ""];
+    var out = [nameLine + "의 장비", "> 평균 품질: " + avgQuality, ""];
     for (var j = 0; j < model.items.length; j++) {
         var it = model.items[j];
         var lv = (it.itemLevel != null) ? it.itemLevel : "?";
