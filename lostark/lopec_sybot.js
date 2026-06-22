@@ -22,7 +22,8 @@ const MAIN_DEFAULT_CONFIG = {
     JS_KEY: "no_URL",
     LOSTARK_API_KEY: "no_API_KEY",
     LOPEC_TEMPLATE_ID: "no_LOPEC_TEMPLATE_ID",
-    AVATAR_TEMPLATE_ID: "no_AVATAR_TEMPLATE_ID"
+    AVATAR_TEMPLATE_ID: "no_AVATAR_TEMPLATE_ID",
+    HUB_TEMPLATE_ID: 134558
 };
 
 /**
@@ -528,6 +529,29 @@ bot.addListener(Event.MESSAGE, (msg) => {
                 Log.e("아바타 조회 쓰레드 에러: " + e);
             }
         }).start();
+        return;
+    }
+
+    // 로아허브 바로가기
+    if (/^\.(로아허브|ㄹㅇㅎㅂ|ㅎㅂ|허브)$/.test(content)) {
+        logCommand(msg, "로아허브 바로가기");
+
+        // 카카오링크 로그인이 안 되어있으면 시도
+        if (!loginCookies) {
+            tryLogin();
+            msg.reply("카카오링크 로그인 세션이 없습니다. 잠시 후 다시 시도해주세요.");
+            return;
+        }
+
+        // 카카오링크 클라이언트 초기화 및 전송 (버튼 링크/이미지는 템플릿에 고정)
+        client.init(config.JS_KEY, DOMAIN, loginCookies);
+        client.sendLink(msg.room, {
+            templateId: config.HUB_TEMPLATE_ID,
+            templateArgs: {}
+        }, 'custom').catch(e => {
+            Log.e("로아허브 전송 실패: " + e);
+            msg.reply("❌ 카카오링크 전송 실패");
+        });
         return;
     }
 });
