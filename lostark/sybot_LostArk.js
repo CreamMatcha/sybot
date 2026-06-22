@@ -1773,6 +1773,50 @@ function renderEquipmentView(model) {
 }
 
 // ==========================================
+// 내실 조회 (수집형 포인트) - .내실 / .ㄴㅅ
+// ==========================================
+
+// GET /armories/characters/{charName}/collectibles
+function fetchCollectibles(charNameRaw) {
+    var charName = String(charNameRaw);
+    var url = LOSTARK_BASE + "/armories/characters/" + charName + "/collectibles";
+
+    var res = httpGetUtf8(url, { "authorization": "bearer " + config.LOSTARK_API_KEY });
+    if (!res.ok) {
+        if (res.code === 404) return { ok: false, reason: "NOT_FOUND" };
+        return { ok: false, reason: "HTTP_" + res.code };
+    }
+
+    var arr;
+    try {
+        arr = JSON.parse(res.text);
+    } catch (e) {
+        return { ok: false, reason: "PARSE_ERROR" };
+    }
+
+    if (!arr || arr.length === 0) return { ok: false, reason: "NO_DATA" };
+
+    var items = [];
+    for (var i = 0; i < arr.length; i++) {
+        var it = arr[i];
+        if (!it) continue;
+        items.push({ type: it.Type, point: it.Point, maxPoint: it.MaxPoint });
+    }
+
+    return { ok: true, name: charName, items: items };
+}
+
+function renderCollectiblesView(model) {
+    var out = [model.name + "의 내실", ""];
+    for (var i = 0; i < model.items.length; i++) {
+        var it = model.items[i];
+        var pct = it.maxPoint > 0 ? normalizePercentText((it.point / it.maxPoint * 100).toFixed(2)) : "0";
+        out.push(it.type + " " + it.point + "/" + it.maxPoint + "(" + pct + "%)");
+    }
+    return out.join("\n");
+}
+
+// ==========================================
 // 직업 시너지 데이터 및 처리 함수
 // ==========================================
 var SYNERGY_DATA = [
@@ -2232,6 +2276,31 @@ bot.addListener(Event.MESSAGE, function (msg) {
             }
         } catch (e) {
             handleApiError(msg, e, "장비 조회", charEquip);
+        }
+        return;
+    }
+
+    // 내실 조회 (.내실, .ㄴㅅ)
+    var mColl = content.match(/^(?:\.내실|\.ㄴㅅ)\s+(\S+)$/);
+    if (mColl) {
+        var charColl = mColl[1];
+        logCommand(msg, "내실 조회", charColl);
+
+        try {
+            var rColl = fetchCollectibles(charColl);
+
+            if (rColl && rColl.ok) {
+                msg.reply(renderCollectiblesView(rColl));
+            } else {
+                var reasonColl = (rColl && rColl.reason) ? rColl.reason : "UNKNOWN";
+                if (reasonColl === "NO_DATA") {
+                    msg.reply("해당 캐릭터는 내실 정보를 불러올 수 없습니다.");
+                } else {
+                    handleApiError(msg, reasonColl, "내실 조회", charColl);
+                }
+            }
+        } catch (e) {
+            handleApiError(msg, e, "내실 조회", charColl);
         }
         return;
     }
