@@ -1807,11 +1807,25 @@ function fetchCollectibles(charNameRaw) {
 }
 
 function renderCollectiblesView(model) {
-    var out = [model.name + "의 내실", ""];
+    var rows = [];
+    var sumPct = 0;
     for (var i = 0; i < model.items.length; i++) {
         var it = model.items[i];
-        var pct = it.maxPoint > 0 ? normalizePercentText((it.point / it.maxPoint * 100).toFixed(2)) : "0";
-        out.push(it.type + " " + it.point + "/" + it.maxPoint + "(" + pct + "%)");
+        var pct = it.maxPoint > 0 ? (it.point / it.maxPoint * 100) : 0;
+        sumPct += pct;
+        rows.push({ type: it.type, point: it.point, maxPoint: it.maxPoint, pct: pct });
+    }
+
+    // 달성률 낮은 순 정렬 (챙겨야 할 항목을 먼저 보여줌)
+    rows.sort(function (a, b) { return a.pct - b.pct; });
+
+    var avgPct = rows.length ? (sumPct / rows.length) : 0;
+
+    var out = [model.name + "의 내실 (" + avgPct.toFixed(0) + "%)", "━━━━━━━━━━━━━━"];
+    for (var j = 0; j < rows.length; j++) {
+        var r = rows[j];
+        var mark = r.pct >= 100 ? "✓ " : "";
+        out.push(mark + r.type + " " + r.point + "/" + r.maxPoint + "(" + r.pct.toFixed(0) + "%)");
     }
     return out.join("\n");
 }
