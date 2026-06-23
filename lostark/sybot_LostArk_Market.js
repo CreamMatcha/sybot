@@ -689,7 +689,7 @@ bot.addListener(Event.MESSAGE, (msg) => {
             }
 
             if (isSuccess) {
-                msg.reply(`아이템 시세\n\n${sections.join("\n\n")}`);
+                msg.reply(`아이템 시세\n\n${sections.join("\n\n")}\n\n*전날 평균가 대비 변동폭(%)`);
             }
 
         } catch (e) {
