@@ -330,18 +330,29 @@ function checkMarketAlerts() {
 
 /* ==================== [재료 시세 조회] ==================== */
 
-// .재료 명령어로 조회할 단일 아이템 목록 (검색 결과가 정확히 1개인 항목)
+// 아이템 시세 명령어 (.재료 / .템 / .시세, 초성 .ㅈㄹ·ㅈㄹ / .ㅌ·ㅌ)
+const MATERIAL_COMMAND_ALIASES = [".재료", ".템", ".시세", ".ㅈㄹ", "ㅈㄹ", ".ㅌ", "ㅌ"];
+
+// 조회할 재련 재료 목록 (검색 결과가 정확히 1개인 항목)
 const MATERIAL_ITEMS = [
     { CategoryCode: 50010, ItemName: "상급 아비도스" },
     { CategoryCode: 50010, ItemName: "운명의 파괴석 결정" },
-    { CategoryCode: 50010, ItemName: "운명의 수호석 결정" },
     { CategoryCode: 50010, ItemName: "운명의 파괴석" },
-    { CategoryCode: 50010, ItemName: "운명의 수호석" },
-    { CategoryCode: 51100 } // 카테고리 내 아이템이 1개뿐이라 ItemName 불필요
+    { CategoryCode: 50010, ItemName: "운명의 수호석 결정" },
+    { CategoryCode: 50010, ItemName: "운명의 수호석" }
 ];
 
-// .재료 명령어로 조회할 다중 아이템 검색 조건 (영웅 등급 젬 - 검색 결과가 여러 개인 항목)
+// 조회할 단일 아이템 (카테고리 내 아이템이 1개뿐이라 ItemName 불필요 - 에스더의 기운)
+const MATERIAL_SOLO_ITEM = { CategoryCode: 51100 };
+
+// 조회할 영웅 등급 젬 검색 조건 (검색 결과가 여러 개인 항목)
 const MATERIAL_GEM_QUERY = { CategoryCode: 230000, ItemGrade: "영웅", ItemName: "젬 :" };
+
+// 젬 출력 순서 (그룹별로 줄바꿈 구분: 질서 / 혼돈)
+const GEM_DISPLAY_GROUPS = [
+    ["질서의 젬 : 안정", "질서의 젬 : 견고", "질서의 젬 : 불변"],
+    ["혼돈의 젬 : 왜곡", "혼돈의 젬 : 침식", "혼돈의 젬 : 붕괴"]
+];
 
 /**
  * @description 경매장 시세 API에서 조건에 맞는 아이템 목록을 조회합니다.
@@ -579,12 +590,14 @@ bot.addListener(Event.MESSAGE, (msg) => {
         }
     }
 
-    else if (content === ".재료") {
-        logCommand(msg, "재료 시세 조회", "");
+    else if (MATERIAL_COMMAND_ALIASES.includes(content)) {
+        logCommand(msg, "아이템 시세 조회", "");
         try {
-            let resultMsg = `재료 시세\n`;
             let isSuccess = true;
+            const sections = [];
 
+            // 재련 재료
+            const materialLines = [];
             for (const query of MATERIAL_ITEMS) {
                 const result = fetchMarketItems(query);
                 const label = query.ItemName || `재료(${query.CategoryCode})`;
@@ -595,14 +608,16 @@ bot.addListener(Event.MESSAGE, (msg) => {
                         isSuccess = false;
                         break;
                     }
-                    resultMsg += `\n${label}: 조회 실패`;
+                    materialLines.push(`${label}: 조회 실패`);
                     continue;
                 }
 
                 const item = result.items[0];
-                resultMsg += item ? `\n${formatMaterialLine(item)}` : `\n${label}: 매물 없음`;
+                materialLines.push(item ? formatMaterialLine(item) : `${label}: 매물 없음`);
             }
+            if (isSuccess) sections.push(materialLines.join("\n"));
 
+            // 영웅 등급 젬 (질서 / 혼돈 그룹별로 고정 순서 출력)
             if (isSuccess) {
                 const gemResult = fetchMarketItems(MATERIAL_GEM_QUERY);
 
@@ -611,17 +626,40 @@ bot.addListener(Event.MESSAGE, (msg) => {
                         msg.reply("⚠️ API 키가 만료되었거나 올바르지 않습니다.");
                         isSuccess = false;
                     }
-                } else if (gemResult.items.length === 0) {
-                    resultMsg += `\n영웅 젬: 매물 없음`;
                 } else {
-                    for (const gem of gemResult.items) {
-                        resultMsg += `\n${formatMaterialLine(gem)}`;
+                    const gemByName = {};
+                    for (const gem of gemResult.items) gemByName[gem.Name] = gem;
+
+                    for (const group of GEM_DISPLAY_GROUPS) {
+                        const groupLines = group
+                            .map(name => gemByName[name])
+                            .filter(Boolean)
+                            .map(formatMaterialLine);
+                        if (groupLines.length > 0) sections.push(groupLines.join("\n"));
                     }
                 }
             }
 
+            // 단일 아이템 (에스더의 기운)
             if (isSuccess) {
-                msg.reply(resultMsg.trim());
+                const soloResult = fetchMarketItems(MATERIAL_SOLO_ITEM);
+                const soloLabel = MATERIAL_SOLO_ITEM.ItemName || `재료(${MATERIAL_SOLO_ITEM.CategoryCode})`;
+
+                if (!soloResult.ok) {
+                    if (soloResult.code === 401) {
+                        msg.reply("⚠️ API 키가 만료되었거나 올바르지 않습니다.");
+                        isSuccess = false;
+                    } else {
+                        sections.push(`${soloLabel}: 조회 실패`);
+                    }
+                } else {
+                    const item = soloResult.items[0];
+                    sections.push(item ? formatMaterialLine(item) : `${soloLabel}: 매물 없음`);
+                }
+            }
+
+            if (isSuccess) {
+                msg.reply(`아이템 시세\n\n${sections.join("\n\n")}`);
             }
 
         } catch (e) {
