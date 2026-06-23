@@ -328,6 +328,59 @@ function checkMarketAlerts() {
 }
 
 
+/* ==================== [재료 시세 조회] ==================== */
+
+// .재료 명령어로 조회할 단일 아이템 목록 (검색 결과가 정확히 1개인 항목)
+const MATERIAL_ITEMS = [
+    { CategoryCode: 50010, ItemName: "상급 아비도스" },
+    { CategoryCode: 50010, ItemName: "운명의 파괴석 결정" },
+    { CategoryCode: 50010, ItemName: "운명의 수호석 결정" },
+    { CategoryCode: 50010, ItemName: "운명의 파괴석" },
+    { CategoryCode: 50010, ItemName: "운명의 수호석" },
+    { CategoryCode: 51100 } // 카테고리 내 아이템이 1개뿐이라 ItemName 불필요
+];
+
+// .재료 명령어로 조회할 다중 아이템 검색 조건 (영웅 등급 젬 - 검색 결과가 여러 개인 항목)
+const MATERIAL_GEM_QUERY = { CategoryCode: 230000, ItemGrade: "영웅", ItemName: "젬 :" };
+
+/**
+ * @description 경매장 시세 API에서 조건에 맞는 아이템 목록을 조회합니다.
+ * @param {object} query CategoryCode, ItemName, ItemGrade 등 검색 조건
+ * @returns {{ok: boolean, items: object[], code: number}}
+ */
+function fetchMarketItems(query) {
+    const url = "https://developer-lostark.game.onstove.com/markets/items";
+
+    const headers = {
+        "accept": "application/json",
+        "authorization": `bearer ${config.LOSTARK_API_KEY}`,
+        "Content-Type": "application/json"
+    };
+
+    const body = Object.assign({ "PageNo": 1 }, query);
+
+    const response = fetchLostarkApi(url, headers, body);
+    if (response.code !== 200) {
+        return { ok: false, items: [], code: response.code };
+    }
+
+    const data = JSON.parse(response.body);
+    return { ok: true, items: data.Items || [], code: 200 };
+}
+
+/**
+ * @description 시세 아이템 1건을 "이름: 가격(전일 평균가 대비 %)" 형식의 한 줄로 변환합니다.
+ * @param {object} item API에서 반환된 아이템 객체
+ * @returns {string}
+ */
+function formatMaterialLine(item) {
+    const changePercent = item.YDayAvgPrice
+        ? ((item.CurrentMinPrice - item.YDayAvgPrice) / item.YDayAvgPrice) * 100
+        : 0;
+    return `${item.Name}: ${formatNumber(item.CurrentMinPrice)}(${formatPercent(changePercent)})`;
+}
+
+
 /* ==================== [이벤트 핸들러] ==================== */
 
 /**
@@ -523,6 +576,57 @@ bot.addListener(Event.MESSAGE, (msg) => {
         } catch (e) {
             Log.e(`[Script Error - Gem] ${e.stack}`);
             msg.reply("앗차차! 보석 시세 조회 중 오류가 발생했어요.");
+        }
+    }
+
+    else if (content === ".재료") {
+        logCommand(msg, "재료 시세 조회", "");
+        try {
+            let resultMsg = `재료 시세\n`;
+            let isSuccess = true;
+
+            for (const query of MATERIAL_ITEMS) {
+                const result = fetchMarketItems(query);
+                const label = query.ItemName || `재료(${query.CategoryCode})`;
+
+                if (!result.ok) {
+                    if (result.code === 401) {
+                        msg.reply("⚠️ API 키가 만료되었거나 올바르지 않습니다.");
+                        isSuccess = false;
+                        break;
+                    }
+                    resultMsg += `\n${label}: 조회 실패`;
+                    continue;
+                }
+
+                const item = result.items[0];
+                resultMsg += item ? `\n${formatMaterialLine(item)}` : `\n${label}: 매물 없음`;
+            }
+
+            if (isSuccess) {
+                const gemResult = fetchMarketItems(MATERIAL_GEM_QUERY);
+
+                if (!gemResult.ok) {
+                    if (gemResult.code === 401) {
+                        msg.reply("⚠️ API 키가 만료되었거나 올바르지 않습니다.");
+                        isSuccess = false;
+                    }
+                } else if (gemResult.items.length === 0) {
+                    resultMsg += `\n영웅 젬: 매물 없음`;
+                } else {
+                    for (const gem of gemResult.items) {
+                        resultMsg += `\n${formatMaterialLine(gem)}`;
+                    }
+                }
+            }
+
+            if (isSuccess) {
+                msg.reply(resultMsg.trim());
+            }
+
+        } catch (e) {
+            Log.e(`[Script Error - Material] ${e.stack}`);
+            msg.reply("앗차차! 재료 시세 조회 중 오류가 발생했어요.");
         }
     }
 
