@@ -382,6 +382,19 @@ function fetchMarketItems(query) {
 }
 
 /**
+ * @description 표시용으로 아이템 이름을 줄입니다 (예: "운명의 파괴석" -> "파괴석").
+ * @param {string} name API에서 반환된 아이템 이름
+ * @returns {string}
+ */
+function shortenMaterialName(name) {
+    return name
+        .replace("운명의 ", "")
+        .replace(" 융화 재료", "")
+        .replace("질서의 젬", "질서젬")
+        .replace("혼돈의 젬", "혼돈젬");
+}
+
+/**
  * @description 시세 아이템 1건을 "이름: 가격(전일 평균가 대비 %)" 형식의 한 줄로 변환합니다.
  * @param {object} item API에서 반환된 아이템 객체
  * @returns {string}
@@ -390,7 +403,7 @@ function formatMaterialLine(item) {
     const changePercent = item.YDayAvgPrice
         ? ((item.CurrentMinPrice - item.YDayAvgPrice) / item.YDayAvgPrice) * 100
         : 0;
-    return `${item.Name}: ${formatNumber(item.CurrentMinPrice)}(${formatPercent(changePercent)})`;
+    return `${shortenMaterialName(item.Name)}: ${formatNumber(item.CurrentMinPrice)}(${formatPercent(changePercent)})`;
 }
 
 /**
