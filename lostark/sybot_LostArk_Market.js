@@ -26,7 +26,7 @@ const MAIN_DEFAULT_CONFIG = {
     LOSTARK_API_KEY: "no_API_KEY",
     MARKET_ALERT_ROOMS: [], // .시세알림켜기 명령어로 등록된, 알림을 받을 방 목록
     ACC_ALERT_ROOMS: [],    // .악세알림켜기 명령어로 등록된, 악세 알림을 받을 방 목록
-    ACC_ALERT_THRESHOLDS: { "낙아": null, "아피": null } // 악세별 기준가
+    ACC_ALERT_THRESHOLDS: { "목걸이": null, "반지": null } // 악세별 기준가
 };
 
 // [설정] 각인서 줄임말 매핑 (정식 명칭 -> 줄임말)
@@ -335,14 +335,14 @@ const ACC_ALERT_NEAR_RATIO = 1.1; // 기준가 × 이 비율 이하면 "근접" 
 
 const ACC_ALERT_ITEMS = [
     {
-        key: "낙아",
+        key: "목걸이",
         label: "낙인력+아덴 목걸이 (상상)",
         category: 200010,
         opt1: 44, v1: 800,
         opt2: 43, v2: 600
     },
     {
-        key: "아피",
+        key: "반지",
         label: "아공+아피 반지 (상상)",
         category: 200030,
         opt1: 51, v1: 500,
@@ -1038,7 +1038,7 @@ bot.addListener(Event.MESSAGE, (msg) => {
         }
     }
 
-    // 상상 악세 기준가 설정 (.기준 낙아 160만 / .기준 아피 50만)
+    // 상상 악세 기준가 설정 (.기준 목걸이 160만 / .기준 반지 50만)
     else if (content.startsWith(".기준")) {
         const parts = content.split(/\s+/);
         const keyArg = parts[1];
@@ -1046,17 +1046,17 @@ bot.addListener(Event.MESSAGE, (msg) => {
         logCommand(msg, "악세 기준가 설정", `${keyArg || ""} ${priceArg || ""}`);
         try {
             if (!keyArg || !priceArg) {
-                msg.reply("⚠️ 사용법: .기준 낙아 160만 / .기준 아피 50만");
+                msg.reply("⚠️ 사용법: .기준 목걸이 160만 / .기준 반지 50만");
                 return;
             }
             const targetItem = ACC_ALERT_ITEMS.find(i => i.key === keyArg);
             if (!targetItem) {
-                msg.reply(`⚠️ 알 수 없는 악세 키워드입니다. (낙아, 아피)`);
+                msg.reply(`⚠️ 알 수 없는 악세 키워드입니다. (목걸이, 반지)`);
                 return;
             }
             const price = parsePrice(priceArg);
             if (!price) {
-                msg.reply("⚠️ 올바른 가격 형식이 아닙니다. (예: .기준 낙아 160만)");
+                msg.reply("⚠️ 올바른 가격 형식이 아닙니다. (예: .기준 목걸이 160만)");
                 return;
             }
             if (!config.ACC_ALERT_THRESHOLDS) config.ACC_ALERT_THRESHOLDS = {};
