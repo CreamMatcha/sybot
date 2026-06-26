@@ -858,36 +858,36 @@ bot.addListener(Event.MESSAGE, (msg) => {
                 {
                     name1: "적주피", opt1: 42, val1: { "하": 55, "중": 120, "상": 200 },
                     name2: "추피", opt2: 41, val2: { "하": 70, "중": 160, "상": 260 },
-                    category: 200010, primaryIsName1: true // 목걸이: 적주피가 상옵일 때 기본 명령어
+                    category: 200010
                 },
                 {
                     name1: "낙인력", opt1: 44, val1: { "하": 215, "중": 480, "상": 800 },
                     name2: "아덴", opt2: 43, val2: { "하": 160, "중": 360, "상": 600 },
-                    category: 200010, primaryIsName1: true // 목걸이: 낙인력이 상옵일 때 기본 명령어
+                    category: 200010
                 },
                 {
                     name1: "공%", opt1: 45, val1: { "하": 40, "중": 95, "상": 155 },
                     name2: "무공%", opt2: 46, val2: { "하": 80, "중": 180, "상": 300 },
-                    category: 200020, primaryIsName1: true // 귀걸이: 공%가 상옵일 때 기본 명령어
+                    category: 200020
                 },
                 {
                     name1: "무공%", opt1: 46, val1: { "하": 80, "중": 180, "상": 300 },
                     name2: "무공+", opt2: 54, val2: { "하": 195, "중": 480, "상": 960 },
-                    category: 200020, specialRule: "무공+", primaryIsName1: true
+                    category: 200020, specialRule: "무공+"
                 },
                 {
                     name1: "아공", opt1: 51, val1: { "하": 135, "중": 300, "상": 500 },
                     name2: "아피", opt2: 52, val2: { "하": 200, "중": 450, "상": 750 },
-                    category: 200030, primaryIsName1: false // 반지: 아피강%가 상옵일 때 기본 명령어
+                    category: 200030
                 },
                 {
                     name1: "치적", opt1: 49, val1: { "하": 40, "중": 95, "상": 155 },
                     name2: "치피", opt2: 50, val2: { "하": 110, "중": 240, "상": 400 },
-                    category: 200030, primaryIsName1: false // 반지: 치피%가 상옵일 때 기본 명령어
+                    category: 200030
                 }
             ];
 
-            let resultMsg = `${lvl1}${lvl2} 악세 시세\n`;
+            let resultMsg = `${lvl1}${lvl2} 악세 시세`;
             let isSuccess = true;
 
             // 시세 조회 함수
@@ -922,31 +922,44 @@ bot.addListener(Event.MESSAGE, (msg) => {
                 }
             };
 
-            // 조합별 조회 실행 (명령어의 첫 등급이 주요 옵션, 둘째 등급이 부옵션)
-            for (const pair of accPairs) {
+            // 카테고리별로 그룹화하여 출력
+            const ACC_CATEGORIES = [
+                { label: "목걸이", code: 200010 },
+                { label: "귀걸이", code: 200020 },
+                { label: "반지",   code: 200030 }
+            ];
+
+            for (const cat of ACC_CATEGORIES) {
                 if (!isSuccess) break;
-                if (pair.specialRule === "무공+" && lvl1 !== "상") continue;
+                const catPairLines = [];
 
-                let price, lineLabel;
+                for (const pair of accPairs) {
+                    if (!isSuccess) break;
+                    if (pair.category !== cat.code) continue;
 
-                if (lvl1 === lvl2) {
-                    price = getAccPrice(pair.category, pair.opt1, pair.val1[lvl1], pair.opt2, pair.val2[lvl2]);
-                    lineLabel = `${pair.name1} + ${pair.name2}`;
-                } else {
-                    // primaryIsName1: true면 name1이 주요 옵션(lvl1 등급), false면 name2가 주요 옵션
-                    const o1grade = pair.primaryIsName1 ? lvl1 : lvl2;
-                    const o2grade = pair.primaryIsName1 ? lvl2 : lvl1;
-                    const primaryName = pair.primaryIsName1 ? pair.name1 : pair.name2;
-                    const secondaryName = pair.primaryIsName1 ? pair.name2 : pair.name1;
-                    price = getAccPrice(pair.category, pair.opt1, pair.val1[o1grade], pair.opt2, pair.val2[o2grade]);
-                    lineLabel = `${primaryName} ${lvl1} + ${secondaryName} ${lvl2}`;
+                    const pairLines = [];
+
+                    if (lvl1 === lvl2) {
+                        if (pair.specialRule === "무공+" && lvl1 !== "상") continue;
+                        const price = getAccPrice(pair.category, pair.opt1, pair.val1[lvl1], pair.opt2, pair.val2[lvl2]);
+                        pairLines.push(`${pair.name1} + ${pair.name2}: ${price}`);
+                    } else {
+                        if (!(pair.specialRule === "무공+" && lvl1 !== "상")) {
+                            const priceA = getAccPrice(pair.category, pair.opt1, pair.val1[lvl1], pair.opt2, pair.val2[lvl2]);
+                            pairLines.push(`${pair.name1} ${lvl1} + ${pair.name2} ${lvl2}: ${priceA}`);
+                        }
+                        if (!(pair.specialRule === "무공+" && lvl2 !== "상")) {
+                            const priceB = getAccPrice(pair.category, pair.opt1, pair.val1[lvl2], pair.opt2, pair.val2[lvl1]);
+                            pairLines.push(`${pair.name1} ${lvl2} + ${pair.name2} ${lvl1}: ${priceB}`);
+                        }
+                    }
+
+                    if (pairLines.length > 0) catPairLines.push(pairLines.join("\n"));
                 }
 
-                resultMsg += `\n${lineLabel}: ${price}`;
-            }
-
-            if (lvl1 !== lvl2) {
-                resultMsg += `\n\n*리버스는 .${lvl2}${lvl1}을 입력하세요`;
+                if (catPairLines.length > 0) {
+                    resultMsg += `\n\n[${cat.label}]\n${catPairLines.join("\n\n")}`;
+                }
             }
 
             if (isSuccess) {
