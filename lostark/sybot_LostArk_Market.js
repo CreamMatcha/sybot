@@ -24,7 +24,9 @@ let config = {};
 // [설정] config 관련 설정
 const MAIN_DEFAULT_CONFIG = {
     LOSTARK_API_KEY: "no_API_KEY",
-    MARKET_ALERT_ROOMS: [] // .시세알림켜기 명령어로 등록된, 알림을 받을 방 목록
+    MARKET_ALERT_ROOMS: [], // .시세알림켜기 명령어로 등록된, 알림을 받을 방 목록
+    ACC_ALERT_ROOMS: [],    // .악세알림켜기 명령어로 등록된, 악세 알림을 받을 방 목록
+    ACC_ALERT_THRESHOLDS: { "낙아": null, "아피": null } // 악세별 기준가
 };
 
 // [설정] 각인서 줄임말 매핑 (정식 명칭 -> 줄임말)
@@ -270,17 +272,16 @@ function formatPercent(percent) {
  * @description 등록된 모든 알림방에 메시지를 전송합니다.
  * @param {string} message
  */
-function sendToAlertRooms(message) {
-    const rooms = config.MARKET_ALERT_ROOMS || [];
+function sendToAlertRooms(message, rooms) {
+    const targetRooms = rooms !== undefined ? rooms : (config.MARKET_ALERT_ROOMS || []);
     const JavaThread = java.lang.Thread;
 
-    for (let i = 0; i < rooms.length; i++) {
+    for (let i = 0; i < targetRooms.length; i++) {
         try {
-            bot.send(rooms[i], message);
+            bot.send(targetRooms[i], message);
         } catch (e) {
-            Log.e(`[시세 알림 전송 실패] ${rooms[i]}: ${e.message}`);
+            Log.e(`[시세 알림 전송 실패] ${targetRooms[i]}: ${e.message}`);
         }
-        // 카카오톡 도배 방지를 위한 짧은 대기
         JavaThread.sleep(50);
     }
 }
@@ -323,6 +324,142 @@ function checkMarketAlerts() {
 
         } catch (e) {
             Log.e(`[시세 알림 체크 오류 - ${itemDef.key}] ${e.stack}`);
+        }
+    }
+}
+
+
+/* ==================== [상상 악세 알림] ==================== */
+
+const ACC_ALERT_NEAR_RATIO = 1.1; // 기준가 × 이 비율 이하면 "근접" 알림
+
+const ACC_ALERT_ITEMS = [
+    {
+        key: "낙아",
+        label: "낙인력+아덴 목걸이 (상상)",
+        category: 200010,
+        opt1: 44, v1: 800,
+        opt2: 43, v2: 600
+    },
+    {
+        key: "아피",
+        label: "아공+아피 반지 (상상)",
+        category: 200030,
+        opt1: 51, v1: 500,
+        opt2: 52, v2: 750
+    }
+];
+
+let accAlertState = {};
+
+/**
+ * @description 상상 악세 1종의 경매장 최저 즉구가를 조회합니다.
+ * @param {object} item ACC_ALERT_ITEMS의 항목
+ * @returns {{ok: boolean, price: number|null, code: number}}
+ */
+function fetchAccItems(item) {
+    const url = "https://developer-lostark.game.onstove.com/auctions/items";
+    const headers = {
+        "accept": "application/json",
+        "authorization": `bearer ${config.LOSTARK_API_KEY}`,
+        "Content-Type": "application/json"
+    };
+    const body = {
+        "Sort": "BUY_PRICE",
+        "CategoryCode": item.category,
+        "ItemTier": 4,
+        "ItemGrade": "고대",
+        "ItemGradeQuality": 67,
+        "PageNo": 1,
+        "SortCondition": "ASC",
+        "EtcOptions": [
+            { "FirstOption": 7, "SecondOption": item.opt1, "MinValue": item.v1, "MaxValue": item.v1 },
+            { "FirstOption": 7, "SecondOption": item.opt2, "MinValue": item.v2, "MaxValue": item.v2 }
+        ]
+    };
+    const response = fetchLostarkApi(url, headers, body);
+    if (response.code !== 200) return { ok: false, items: [], code: response.code };
+    const data = JSON.parse(response.body);
+    return { ok: true, items: data.Items || [], code: 200 };
+}
+
+/**
+ * @description "160만", "1600000" 형식의 문자열을 정수 골드로 변환합니다.
+ * @param {string} str
+ * @returns {number|null}
+ */
+function parsePrice(str) {
+    const m = String(str).trim().match(/^(\d+(?:\.\d+)?)(만)?$/);
+    if (!m) return null;
+    return m[2] === "만" ? Math.round(parseFloat(m[1]) * 10000) : Math.round(parseFloat(m[1]));
+}
+
+/**
+ * @description 악세 아이템 1건을 카카오톡 출력용 문자열로 변환합니다.
+ * @param {object} item API Items 배열의 단일 항목
+ * @returns {string}
+ */
+function formatAccItem(item) {
+    const info = item.AuctionInfo;
+
+    const remaining = new Date(info.EndDate).getTime() - Date.now();
+    const hours = Math.floor(remaining / (1000 * 60 * 60));
+    const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+    const timeStr = remaining <= 0 ? "만료" : `${hours}시간 ${minutes}분`;
+
+    const upgradeOpts = item.Options
+        .filter(o => o.Type === "ACCESSORY_UPGRADE")
+        .map(o => o.IsValuePercentage
+            ? `${o.OptionName.trim()} ${o.Value}%`
+            : `${o.OptionName.trim()} ${o.Value}`
+        );
+
+    const mainStat = item.Options.find(o =>
+        o.Type === "STAT" && ["힘", "민첩", "지능"].includes(o.OptionName)
+    );
+
+    const lines = [
+        item.Name,
+        `품질: ${item.GradeQuality}`,
+        `남은시간: ${timeStr}`,
+        `거래가능횟수: ${info.TradeAllowCount}`
+    ];
+    for (const opt of upgradeOpts) lines.push(opt);
+    if (mainStat) lines.push(`힘/민첩/지능: ${mainStat.Value}`);
+    lines.push(`현재최저가: ${formatNumber(info.BuyPrice)}`);
+
+    return lines.join("\n");
+}
+
+/**
+ * @description 감시 중인 상상 악세의 가격을 체크하고, 기준가 근접/이하 시 알림을 보냅니다.
+ */
+function checkAccAlerts() {
+    if (!config.ACC_ALERT_ROOMS || config.ACC_ALERT_ROOMS.length === 0) return;
+    if (!config.ACC_ALERT_THRESHOLDS) return;
+
+    for (const item of ACC_ALERT_ITEMS) {
+        const threshold = config.ACC_ALERT_THRESHOLDS[item.key];
+        if (!threshold) continue;
+
+        try {
+            const result = fetchAccItems(item);
+            if (!result.ok || result.items.length === 0) continue;
+
+            const price = result.items[0].AuctionInfo.BuyPrice;
+            if (price > threshold * ACC_ALERT_NEAR_RATIO) continue;
+
+            const cheapestEndDate = result.items[0].AuctionInfo.EndDate;
+            const state = accAlertState[item.key];
+            if (state && state.endDate === cheapestEndDate) continue;
+
+            const statusText = price <= threshold ? "기준가 이하" : "기준가 근접";
+            const message = `📢 [악세 알림] ${statusText}\n${item.label}\n기준가: ${formatNumber(threshold)}\n현재 최저가: ${formatNumber(price)}`;
+
+            sendToAlertRooms(message, config.ACC_ALERT_ROOMS);
+            accAlertState[item.key] = { endDate: cheapestEndDate };
+        } catch (e) {
+            Log.e(`[악세 알림 오류 - ${item.key}] ${e.stack}`);
         }
     }
 }
@@ -662,6 +799,8 @@ bot.addListener(Event.MESSAGE, (msg) => {
                     if (gemResult.code === 401) {
                         msg.reply("⚠️ API 키가 만료되었거나 올바르지 않습니다.");
                         isSuccess = false;
+                    } else {
+                        sections.push("영웅 젬: 조회 실패");
                     }
                 } else {
                     const gemByName = {};
@@ -821,6 +960,115 @@ bot.addListener(Event.MESSAGE, (msg) => {
         }
     }
 
+    // 상상 악세 현재 매물 조회
+    else if (content === ".악세") {
+        logCommand(msg, "상상 악세 시세 조회", "");
+        try {
+            const sections = [];
+            let isSuccess = true;
+
+            for (const accItem of ACC_ALERT_ITEMS) {
+                const result = fetchAccItems(accItem);
+                if (!result.ok) {
+                    if (result.code === 401) {
+                        msg.reply("⚠️ API 키가 만료되었거나 올바르지 않습니다.");
+                        isSuccess = false;
+                        break;
+                    }
+                    sections.push(`[${accItem.label}]\n조회 실패`);
+                    continue;
+                }
+                if (result.items.length === 0) {
+                    sections.push(`[${accItem.label}]\n매물 없음`);
+                    continue;
+                }
+
+                const threshold = config.ACC_ALERT_THRESHOLDS && config.ACC_ALERT_THRESHOLDS[accItem.key];
+                const headerLine = threshold
+                    ? `[${accItem.label}] 기준: ${formatNumber(threshold)}`
+                    : `[${accItem.label}]`;
+
+                const limit = Math.min(result.items.length, 3);
+                const itemBlocks = [];
+                for (let i = 0; i < limit; i++) {
+                    itemBlocks.push(formatAccItem(result.items[i]));
+                }
+                sections.push(headerLine + "\n\n" + itemBlocks.join("\n\n---\n\n"));
+            }
+
+            if (isSuccess) msg.reply(sections.join("\n\n=====\n\n"));
+        } catch (e) {
+            Log.e(`[Script Error - 악세시세] ${e.stack}`);
+            msg.reply("앗차차! 악세 시세 조회 중 오류가 발생했어요.");
+        }
+    }
+
+    // 상상 악세 알림방 등록
+    else if (content === ".악세알림켜기") {
+        logCommand(msg, "악세알림 켜기", "");
+        try {
+            if (!config.ACC_ALERT_ROOMS) config.ACC_ALERT_ROOMS = [];
+            if (!config.ACC_ALERT_ROOMS.includes(msg.room)) {
+                config.ACC_ALERT_ROOMS.push(msg.room);
+                safeWriteJson(CONFIG_PATH, config);
+            }
+            const t = config.ACC_ALERT_THRESHOLDS || {};
+            const thresholdInfo = ACC_ALERT_ITEMS
+                .map(i => `${i.key}: ${t[i.key] ? formatNumber(t[i.key]) : "미설정"}`)
+                .join(", ");
+            msg.reply(`✅ 이 방에서 상상 악세 알림을 받습니다.\n현재 기준가 — ${thresholdInfo}`);
+        } catch (e) {
+            Log.e(`[Script Error - 악세알림켜기] ${e.stack}`);
+            msg.reply("앗차차! 악세 알림 등록 중 오류가 발생했어요.");
+        }
+    }
+
+    // 상상 악세 알림방 해제
+    else if (content === ".악세알림끄기") {
+        logCommand(msg, "악세알림 끄기", "");
+        try {
+            if (config.ACC_ALERT_ROOMS) {
+                config.ACC_ALERT_ROOMS = config.ACC_ALERT_ROOMS.filter(r => r !== msg.room);
+                safeWriteJson(CONFIG_PATH, config);
+            }
+            msg.reply("🔕 이 방에서 상상 악세 알림을 중지합니다.");
+        } catch (e) {
+            Log.e(`[Script Error - 악세알림끄기] ${e.stack}`);
+            msg.reply("앗차차! 악세 알림 해제 중 오류가 발생했어요.");
+        }
+    }
+
+    // 상상 악세 기준가 설정 (.기준 낙아 160만 / .기준 아피 50만)
+    else if (content.startsWith(".기준")) {
+        const parts = content.split(/\s+/);
+        const keyArg = parts[1];
+        const priceArg = parts[2];
+        logCommand(msg, "악세 기준가 설정", `${keyArg || ""} ${priceArg || ""}`);
+        try {
+            if (!keyArg || !priceArg) {
+                msg.reply("⚠️ 사용법: .기준 낙아 160만 / .기준 아피 50만");
+                return;
+            }
+            const targetItem = ACC_ALERT_ITEMS.find(i => i.key === keyArg);
+            if (!targetItem) {
+                msg.reply(`⚠️ 알 수 없는 악세 키워드입니다. (낙아, 아피)`);
+                return;
+            }
+            const price = parsePrice(priceArg);
+            if (!price) {
+                msg.reply("⚠️ 올바른 가격 형식이 아닙니다. (예: .기준 낙아 160만)");
+                return;
+            }
+            if (!config.ACC_ALERT_THRESHOLDS) config.ACC_ALERT_THRESHOLDS = {};
+            config.ACC_ALERT_THRESHOLDS[targetItem.key] = price;
+            safeWriteJson(CONFIG_PATH, config);
+            msg.reply(`✅ ${targetItem.label} 기준가를 ${formatNumber(price)}(으)로 설정했습니다.`);
+        } catch (e) {
+            Log.e(`[Script Error - 기준 설정] ${e.stack}`);
+            msg.reply("앗차차! 기준가 설정 중 오류가 발생했어요.");
+        }
+    }
+
     // 시세 알림방 등록
     else if (content === ".시세알림켜기") {
         logCommand(msg, "시세알림 켜기", "");
@@ -897,6 +1145,7 @@ bot.addListener(Event.MESSAGE, (msg) => {
     }
 });
 
-// 경매장 시세 알림 주기 체크 시작 (3분 간격)
+// 경매장/악세 시세 알림 주기 체크 시작 (3분 간격)
 checkMarketAlerts();
-setInterval(checkMarketAlerts, MARKET_CHECK_INTERVAL_MS);
+checkAccAlerts();
+setInterval(function() { checkMarketAlerts(); checkAccAlerts(); }, MARKET_CHECK_INTERVAL_MS);
