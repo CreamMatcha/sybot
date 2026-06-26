@@ -837,12 +837,13 @@ bot.addListener(Event.MESSAGE, (msg) => {
         }
     }
 
-    else if (/^\.(상|중|하)(상|중|하)$/.test(content)) {
+    else if (/^\.(상|중|하|ㅅ|ㅈ|ㅎ)(상|중|하|ㅅ|ㅈ|ㅎ)$/.test(content)) {
         logCommand(msg, "악세 시세 조회", content);
         try {
-            const match = content.match(/^\.(상|중|하)(상|중|하)$/);
-            const lvl1 = match[1]; // 첫 번째 옵션 등급 (예: "상")
-            const lvl2 = match[2]; // 두 번째 옵션 등급 (예: "중")
+            const GRADE_MAP = { "상": "상", "중": "중", "하": "하", "ㅅ": "상", "ㅈ": "중", "ㅎ": "하" };
+            const match = content.match(/^\.(상|중|하|ㅅ|ㅈ|ㅎ)(상|중|하|ㅅ|ㅈ|ㅎ)$/);
+            const lvl1 = GRADE_MAP[match[1]];
+            const lvl2 = GRADE_MAP[match[2]];
 
             const url = "https://developer-lostark.game.onstove.com/auctions/items";
             const headers = {
@@ -857,32 +858,32 @@ bot.addListener(Event.MESSAGE, (msg) => {
                 {
                     name1: "적주피", opt1: 42, val1: { "하": 55, "중": 120, "상": 200 },
                     name2: "추피", opt2: 41, val2: { "하": 70, "중": 160, "상": 260 },
-                    category: 200010 // 목걸이
+                    category: 200010, primaryIsName1: true // 목걸이: 적주피가 상옵일 때 기본 명령어
                 },
                 {
                     name1: "낙인력", opt1: 44, val1: { "하": 215, "중": 480, "상": 800 },
                     name2: "아덴", opt2: 43, val2: { "하": 160, "중": 360, "상": 600 },
-                    category: 200010
+                    category: 200010, primaryIsName1: true // 목걸이: 낙인력이 상옵일 때 기본 명령어
                 },
                 {
                     name1: "공%", opt1: 45, val1: { "하": 40, "중": 95, "상": 155 },
                     name2: "무공%", opt2: 46, val2: { "하": 80, "중": 180, "상": 300 },
-                    category: 200020 // 귀걸이
+                    category: 200020, primaryIsName1: true // 귀걸이: 공%가 상옵일 때 기본 명령어
                 },
                 {
                     name1: "무공%", opt1: 46, val1: { "하": 80, "중": 180, "상": 300 },
                     name2: "무공+", opt2: 54, val2: { "하": 195, "중": 480, "상": 960 },
-                    category: 200020, specialRule: "무공+" // 특별 규칙 적용
+                    category: 200020, specialRule: "무공+", primaryIsName1: true
                 },
                 {
                     name1: "아공", opt1: 51, val1: { "하": 135, "중": 300, "상": 500 },
                     name2: "아피", opt2: 52, val2: { "하": 200, "중": 450, "상": 750 },
-                    category: 200030 // 반지
+                    category: 200030, primaryIsName1: false // 반지: 아피강%가 상옵일 때 기본 명령어
                 },
                 {
                     name1: "치적", opt1: 49, val1: { "하": 40, "중": 95, "상": 155 },
                     name2: "치피", opt2: 50, val2: { "하": 110, "중": 240, "상": 400 },
-                    category: 200030
+                    category: 200030, primaryIsName1: false // 반지: 치피%가 상옵일 때 기본 명령어
                 }
             ];
 
@@ -921,31 +922,31 @@ bot.addListener(Event.MESSAGE, (msg) => {
                 }
             };
 
-            // 조합별 조회 실행
+            // 조합별 조회 실행 (명령어의 첫 등급이 주요 옵션, 둘째 등급이 부옵션)
             for (const pair of accPairs) {
                 if (!isSuccess) break;
+                if (pair.specialRule === "무공+" && lvl1 !== "상") continue;
+
+                let price, lineLabel;
 
                 if (lvl1 === lvl2) {
-                    // 상상, 중중, 하하 같은 경우
-                    if (pair.specialRule === "무공+" && lvl1 !== "상") continue; // 무공+가 포함되었지만 상이 아닐 땐 출력 생략
-
-                    const price = getAccPrice(pair.category, pair.opt1, pair.val1[lvl1], pair.opt2, pair.val2[lvl2]);
-                    resultMsg += `\n${pair.name1} + ${pair.name2}: ${price}`;
+                    price = getAccPrice(pair.category, pair.opt1, pair.val1[lvl1], pair.opt2, pair.val2[lvl2]);
+                    lineLabel = `${pair.name1} + ${pair.name2}`;
                 } else {
-                    // 상중, 중상 등 옵션 등급이 다른 경우 2개의 조합으로 나눠서 출력
-
-                    // 조합 A (옵션1이 lvl1, 옵션2가 lvl2)
-                    if (!(pair.specialRule === "무공+" && lvl1 !== "상")) {
-                        const priceA = getAccPrice(pair.category, pair.opt1, pair.val1[lvl1], pair.opt2, pair.val2[lvl2]);
-                        resultMsg += `\n${pair.name1} ${lvl1} + ${pair.name2} ${lvl2}: ${priceA}`;
-                    }
-
-                    // 조합 B (옵션1이 lvl2, 옵션2가 lvl1)
-                    if (!(pair.specialRule === "무공+" && lvl2 !== "상")) {
-                        const priceB = getAccPrice(pair.category, pair.opt1, pair.val1[lvl2], pair.opt2, pair.val2[lvl1]);
-                        resultMsg += `\n${pair.name1} ${lvl2} + ${pair.name2} ${lvl1}: ${priceB}`;
-                    }
+                    // primaryIsName1: true면 name1이 주요 옵션(lvl1 등급), false면 name2가 주요 옵션
+                    const o1grade = pair.primaryIsName1 ? lvl1 : lvl2;
+                    const o2grade = pair.primaryIsName1 ? lvl2 : lvl1;
+                    const primaryName = pair.primaryIsName1 ? pair.name1 : pair.name2;
+                    const secondaryName = pair.primaryIsName1 ? pair.name2 : pair.name1;
+                    price = getAccPrice(pair.category, pair.opt1, pair.val1[o1grade], pair.opt2, pair.val2[o2grade]);
+                    lineLabel = `${primaryName} ${lvl1} + ${secondaryName} ${lvl2}`;
                 }
+
+                resultMsg += `\n${lineLabel}: ${price}`;
+            }
+
+            if (lvl1 !== lvl2) {
+                resultMsg += `\n리버스는 .${lvl2}${lvl1}을 입력하세요`;
             }
 
             if (isSuccess) {
