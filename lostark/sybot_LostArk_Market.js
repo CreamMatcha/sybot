@@ -946,7 +946,7 @@ bot.addListener(Event.MESSAGE, (msg) => {
             }
 
             if (lvl1 !== lvl2) {
-                resultMsg += `\n리버스는 .${lvl2}${lvl1}을 입력하세요`;
+                resultMsg += `\n\n*리버스는 .${lvl2}${lvl1}을 입력하세요`;
             }
 
             if (isSuccess) {
@@ -1149,4 +1149,4 @@ bot.addListener(Event.MESSAGE, (msg) => {
 // 경매장/악세 시세 알림 주기 체크 시작 (3분 간격)
 checkMarketAlerts();
 checkAccAlerts();
-setInterval(function() { checkMarketAlerts(); checkAccAlerts(); }, MARKET_CHECK_INTERVAL_MS);
+setInterval(function () { checkMarketAlerts(); checkAccAlerts(); }, MARKET_CHECK_INTERVAL_MS);
