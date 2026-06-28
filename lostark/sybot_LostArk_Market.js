@@ -331,9 +331,10 @@ function checkMarketAlerts() {
 
 /* ==================== [상상 악세 알림] ==================== */
 
-const ACC_ALERT_NEAR_RATIO = 1.1;     // 일반 기준: 기준가 × 이 비율 이하면 알림
-const ACC_ALERT_SPECIAL_RATIO = 1.3;  // 특수 기준(무공+480/최생6500): 더 느슨한 비율
-const ACC_ALERT_MAX_PAGES = 10;       // 알림 체크 시 가격 ASC로 수집할 최대 페이지 수
+const ACC_ALERT_NEAR_RATIO = 1.1;        // 일반 기준: 기준가 × 이 비율 이하면 알림
+const ACC_ALERT_SPECIAL_RATIO = 1.3;     // 특수 기준(무공+480/최생6500): 더 느슨한 비율
+const ACC_ALERT_MAX_PAGES = 10;          // 알림 체크 시 가격 ASC로 수집할 최대 페이지 수
+const ACC_ZERO_TRADE_DISCOUNT = 200000;  // 거래횟수 0회 매물에 자동 적용하는 기준가 할인액
 
 // 상상 악세 감시 정의. opt1/opt2 = 고정된 두 상옵(EtcOptions 필터용).
 // criteria = 알림 세부 기준. statMin/statMax는 메인스탯(힘/민첩/지능) 허용 범위,
@@ -535,7 +536,7 @@ function checkAccAlerts() {
                 if (!th) continue;
                 const ratio = c.special ? ACC_ALERT_SPECIAL_RATIO : ACC_ALERT_NEAR_RATIO;
                 const ceil = th * ratio;
-                active.push({ c, th, ceil });
+                active.push({ c, th, ceil, ratio });
                 if (ceil > priceCeiling) priceCeiling = ceil;
             }
             if (active.length === 0) continue;
@@ -554,26 +555,55 @@ function checkAccAlerts() {
             }
             if (collected.length === 0) continue;
 
-            // 기준별로 가장 싼 매칭 매물을 찾아 알림 (collected는 가격 ASC 정렬)
+            // 기준별로 거래횟수 1회↑ / 0회를 분리해서 각각 알림 (collected는 가격 ASC 정렬)
             for (const a of active) {
-                let best = null;
+                // 거래횟수 1회 이상: 설정 기준가 그대로
+                let bestTrade = null;
                 for (const it of collected) {
                     if (it.AuctionInfo.BuyPrice > a.ceil) break;
-                    if (matchesAccCriterion(it, a.c)) { best = it; break; }
+                    if (it.AuctionInfo.TradeAllowCount >= 1 && matchesAccCriterion(it, a.c)) {
+                        bestTrade = it; break;
+                    }
                 }
-                if (!best) continue;
 
-                const endDate = best.AuctionInfo.EndDate;
-                const stateKey = item.key + ":" + a.c.key;
-                const state = accAlertState[stateKey];
-                if (state && state.endDate === endDate) continue;
+                // 거래횟수 0회: 기준가 -20만 적용
+                const thZero = a.th - ACC_ZERO_TRADE_DISCOUNT;
+                const ceilZero = thZero * a.ratio;
+                let bestZero = null;
+                if (thZero > 0) {
+                    for (const it of collected) {
+                        if (it.AuctionInfo.BuyPrice > ceilZero) break;
+                        if (it.AuctionInfo.TradeAllowCount === 0 && matchesAccCriterion(it, a.c)) {
+                            bestZero = it; break;
+                        }
+                    }
+                }
 
-                const price = best.AuctionInfo.BuyPrice;
-                const statusText = price <= a.th ? "기준가 이하" : "기준가 근접";
-                const message = `📢 [악세 알림] ${statusText}\n${item.label}\n[기준] ${a.c.label}\n기준가: ${formatNumber(a.th)}\n현재가: ${formatNumber(price)}\n${accDetailLine(best)}`;
+                if (bestTrade) {
+                    const endDate = bestTrade.AuctionInfo.EndDate;
+                    const stateKey = item.key + ":" + a.c.key + ":1";
+                    const state = accAlertState[stateKey];
+                    if (!state || state.endDate !== endDate) {
+                        const price = bestTrade.AuctionInfo.BuyPrice;
+                        const statusText = price <= a.th ? "기준가 이하" : "기준가 근접";
+                        const message = `📢 [악세 알림] ${statusText}\n${item.label}\n[기준] ${a.c.label}\n기준가: ${formatNumber(a.th)}\n현재가: ${formatNumber(price)}\n${accDetailLine(bestTrade)}`;
+                        sendToAlertRooms(message, config.ACC_ALERT_ROOMS);
+                        accAlertState[stateKey] = { endDate };
+                    }
+                }
 
-                sendToAlertRooms(message, config.ACC_ALERT_ROOMS);
-                accAlertState[stateKey] = { endDate: endDate };
+                if (bestZero) {
+                    const endDate = bestZero.AuctionInfo.EndDate;
+                    const stateKey = item.key + ":" + a.c.key + ":0";
+                    const state = accAlertState[stateKey];
+                    if (!state || state.endDate !== endDate) {
+                        const price = bestZero.AuctionInfo.BuyPrice;
+                        const statusText = price <= thZero ? "기준가 이하" : "기준가 근접";
+                        const message = `📢 [악세 알림] ${statusText} (거래 0회)\n${item.label}\n[기준] ${a.c.label}\n기준가: ${formatNumber(thZero)} (설정값 -20만)\n현재가: ${formatNumber(price)}\n${accDetailLine(bestZero)}`;
+                        sendToAlertRooms(message, config.ACC_ALERT_ROOMS);
+                        accAlertState[stateKey] = { endDate };
+                    }
+                }
             }
         } catch (e) {
             Log.e(`[악세 알림 오류 - ${item.key}] ${e.stack}`);
