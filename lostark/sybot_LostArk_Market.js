@@ -26,7 +26,7 @@ const MAIN_DEFAULT_CONFIG = {
     LOSTARK_API_KEY: "no_API_KEY",
     MARKET_ALERT_ROOMS: [], // .시세알림켜기 명령어로 등록된, 알림을 받을 방 목록
     ACC_ALERT_ROOMS: [],    // .악세알림켜기 명령어로 등록된, 악세 알림을 받을 방 목록
-    ACC_ALERT_THRESHOLDS: { "목걸이": null, "반지": null } // 악세별 기준가
+    ACC_ALERT_THRESHOLDS: { "목걸이": {}, "반지": {} } // 악세별·기준별 기준가
 };
 
 // [설정] 각인서 줄임말 매핑 (정식 명칭 -> 줄임말)
@@ -331,22 +331,41 @@ function checkMarketAlerts() {
 
 /* ==================== [상상 악세 알림] ==================== */
 
-const ACC_ALERT_NEAR_RATIO = 1.1; // 기준가 × 이 비율 이하면 "근접" 알림
+const ACC_ALERT_NEAR_RATIO = 1.1;     // 일반 기준: 기준가 × 이 비율 이하면 알림
+const ACC_ALERT_SPECIAL_RATIO = 1.3;  // 특수 기준(무공+480/최생6500): 더 느슨한 비율
+const ACC_ALERT_MAX_PAGES = 10;       // 알림 체크 시 가격 ASC로 수집할 최대 페이지 수
 
+// 상상 악세 감시 정의. opt1/opt2 = 고정된 두 상옵(EtcOptions 필터용).
+// criteria = 알림 세부 기준. statMin/statMax는 메인스탯(힘/민첩/지능) 허용 범위,
+// mugong/cgsaeng는 남은 연마옵션(무공+ 고정값 / 최대생명력)의 최소값.
 const ACC_ALERT_ITEMS = [
     {
         key: "목걸이",
         label: "낙인력+아덴 목걸이 (상상)",
         category: 200010,
         opt1: 44, v1: 800,
-        opt2: 43, v2: 600
+        opt2: 43, v2: 600,
+        criteria: [
+            { key: "풀스탯", label: "메인스탯 17300", statMin: 17150, statMax: 17450 },
+            { key: "무공", label: "메인스탯 16300 + 무공+195↑", statMin: 16150, statMax: 16450, mugong: 195 },
+            { key: "최생", label: "메인스탯 16300 + 최생3250↑", statMin: 16150, statMax: 16450, cgsaeng: 3250 },
+            { key: "품질", label: "품질 90↑", quality: 90 },
+            { key: "특수", label: "무공+480↑ / 최생6500↑", mugong: 480, cgsaeng: 6500, special: true }
+        ]
     },
     {
         key: "반지",
         label: "아공+아피 반지 (상상)",
         category: 200030,
         opt1: 51, v1: 500,
-        opt2: 52, v2: 750
+        opt2: 52, v2: 750,
+        criteria: [
+            { key: "풀스탯", label: "메인스탯 12500", statMin: 12350, statMax: 12650 },
+            { key: "무공", label: "메인스탯 11500 + 무공+195↑", statMin: 11350, statMax: 11650, mugong: 195 },
+            { key: "최생", label: "메인스탯 11500 + 최생3250↑", statMin: 11350, statMax: 11650, cgsaeng: 3250 },
+            { key: "품질", label: "품질 90↑", quality: 90 },
+            { key: "특수", label: "무공+480↑ / 최생6500↑", mugong: 480, cgsaeng: 6500, special: true }
+        ]
     }
 ];
 
@@ -357,7 +376,7 @@ let accAlertState = {};
  * @param {object} item ACC_ALERT_ITEMS의 항목
  * @returns {{ok: boolean, price: number|null, code: number}}
  */
-function fetchAccItems(item) {
+function fetchAccItems(item, pageNo) {
     const url = "https://developer-lostark.game.onstove.com/auctions/items";
     const headers = {
         "accept": "application/json",
@@ -370,7 +389,7 @@ function fetchAccItems(item) {
         "ItemTier": 4,
         "ItemGrade": "고대",
         "ItemGradeQuality": 67,
-        "PageNo": 1,
+        "PageNo": pageNo || 1,
         "SortCondition": "ASC",
         "EtcOptions": [
             { "FirstOption": 7, "SecondOption": item.opt1, "MinValue": item.v1, "MaxValue": item.v1 },
@@ -432,32 +451,130 @@ function formatAccItem(item) {
 }
 
 /**
- * @description 감시 중인 상상 악세의 가격을 체크하고, 기준가 근접/이하 시 알림을 보냅니다.
+ * @description 매물의 메인스탯(힘/민첩/지능) 합계 값을 반환합니다. 없으면 0.
+ */
+function accStatValue(item) {
+    const s = item.Options.find(o =>
+        o.Type === "STAT" && (o.OptionName === "힘" || o.OptionName === "민첩" || o.OptionName === "지능")
+    );
+    return s ? s.Value : 0;
+}
+
+/**
+ * @description 매물에 무공+(고정값) 연마옵션이 minV 이상으로 붙어있는지 확인합니다. (% 옵션 제외)
+ */
+function accHasMugong(item, minV) {
+    return item.Options.some(o =>
+        o.OptionName && o.OptionName.indexOf("무기 공격력") >= 0 && o.IsValuePercentage === false && o.Value >= minV
+    );
+}
+
+/**
+ * @description 매물에 최대 생명력 연마옵션이 minV 이상으로 붙어있는지 확인합니다.
+ */
+function accHasCgsaeng(item, minV) {
+    return item.Options.some(o =>
+        o.OptionName && o.OptionName.indexOf("최대 생명력") >= 0 && o.Value >= minV
+    );
+}
+
+/**
+ * @description 매물이 특정 알림 기준(criterion)에 부합하는지 판정합니다.
+ */
+function matchesAccCriterion(item, c) {
+    if (c.special) {
+        return (c.mugong && accHasMugong(item, c.mugong)) || (c.cgsaeng && accHasCgsaeng(item, c.cgsaeng));
+    }
+    if (c.quality !== undefined) {
+        return item.GradeQuality >= c.quality;
+    }
+    const stat = accStatValue(item);
+    if (stat < c.statMin || stat > c.statMax) return false;
+    if (c.mugong !== undefined) return accHasMugong(item, c.mugong);
+    if (c.cgsaeng !== undefined) return accHasCgsaeng(item, c.cgsaeng);
+    return true; // 풀스탯: 메인스탯 범위만 확인
+}
+
+/**
+ * @description 알림 메시지에 붙일 매물 요약 한 줄(품질/메인스탯/연마옵션).
+ */
+function accDetailLine(item) {
+    const ups = item.Options
+        .filter(o => o.Type === "ACCESSORY_UPGRADE")
+        .map(o => o.IsValuePercentage ? `${o.OptionName.trim()} ${o.Value}%` : `${o.OptionName.trim()} ${o.Value}`);
+    return `품질 ${item.GradeQuality} | 힘민지 ${accStatValue(item)}\n${ups.join(", ")}`;
+}
+
+/**
+ * @description 악세별·기준별 기준가를 안전하게 읽습니다. (구 숫자 형식이면 null 반환)
+ * @returns {number|null}
+ */
+function getAccThreshold(itemKey, critKey) {
+    const t = config.ACC_ALERT_THRESHOLDS;
+    if (!t) return null;
+    const sub = t[itemKey];
+    if (!sub || typeof sub !== "object") return null;
+    const v = sub[critKey];
+    return (typeof v === "number" && v > 0) ? v : null;
+}
+
+/**
+ * @description 감시 중인 상상 악세를 기준별로 체크하고, 기준가 근접/이하 시 알림을 보냅니다.
  */
 function checkAccAlerts() {
     if (!config.ACC_ALERT_ROOMS || config.ACC_ALERT_ROOMS.length === 0) return;
     if (!config.ACC_ALERT_THRESHOLDS) return;
 
     for (const item of ACC_ALERT_ITEMS) {
-        const threshold = config.ACC_ALERT_THRESHOLDS[item.key];
-        if (!threshold) continue;
-
         try {
-            const result = fetchAccItems(item);
-            if (!result.ok || result.items.length === 0) continue;
+            // 기준가가 설정된 활성 기준과, 수집할 가격 상한 계산
+            const active = [];
+            let priceCeiling = 0;
+            for (const c of item.criteria) {
+                const th = getAccThreshold(item.key, c.key);
+                if (!th) continue;
+                const ratio = c.special ? ACC_ALERT_SPECIAL_RATIO : ACC_ALERT_NEAR_RATIO;
+                const ceil = th * ratio;
+                active.push({ c, th, ceil });
+                if (ceil > priceCeiling) priceCeiling = ceil;
+            }
+            if (active.length === 0) continue;
 
-            const price = result.items[0].AuctionInfo.BuyPrice;
-            if (price > threshold * ACC_ALERT_NEAR_RATIO) continue;
+            // 가격 ASC로 priceCeiling 이하 매물 수집 (페이지 안전 상한)
+            const collected = [];
+            for (let page = 1; page <= ACC_ALERT_MAX_PAGES; page++) {
+                const result = fetchAccItems(item, page);
+                if (!result.ok || result.items.length === 0) break;
+                let exceeded = false;
+                for (const it of result.items) {
+                    if (it.AuctionInfo.BuyPrice > priceCeiling) { exceeded = true; break; }
+                    collected.push(it);
+                }
+                if (exceeded || result.items.length < 10) break;
+            }
+            if (collected.length === 0) continue;
 
-            const cheapestEndDate = result.items[0].AuctionInfo.EndDate;
-            const state = accAlertState[item.key];
-            if (state && state.endDate === cheapestEndDate) continue;
+            // 기준별로 가장 싼 매칭 매물을 찾아 알림 (collected는 가격 ASC 정렬)
+            for (const a of active) {
+                let best = null;
+                for (const it of collected) {
+                    if (it.AuctionInfo.BuyPrice > a.ceil) break;
+                    if (matchesAccCriterion(it, a.c)) { best = it; break; }
+                }
+                if (!best) continue;
 
-            const statusText = price <= threshold ? "기준가 이하" : "기준가 근접";
-            const message = `📢 [악세 알림] ${statusText}\n${item.label}\n기준가: ${formatNumber(threshold)}\n현재 최저가: ${formatNumber(price)}`;
+                const endDate = best.AuctionInfo.EndDate;
+                const stateKey = item.key + ":" + a.c.key;
+                const state = accAlertState[stateKey];
+                if (state && state.endDate === endDate) continue;
 
-            sendToAlertRooms(message, config.ACC_ALERT_ROOMS);
-            accAlertState[item.key] = { endDate: cheapestEndDate };
+                const price = best.AuctionInfo.BuyPrice;
+                const statusText = price <= a.th ? "기준가 이하" : "기준가 근접";
+                const message = `📢 [악세 알림] ${statusText}\n${item.label}\n[기준] ${a.c.label}\n기준가: ${formatNumber(a.th)}\n현재가: ${formatNumber(price)}\n${accDetailLine(best)}`;
+
+                sendToAlertRooms(message, config.ACC_ALERT_ROOMS);
+                accAlertState[stateKey] = { endDate: endDate };
+            }
         } catch (e) {
             Log.e(`[악세 알림 오류 - ${item.key}] ${e.stack}`);
         }
@@ -601,7 +718,31 @@ bot.addListener(Event.MESSAGE, (msg) => {
             break;
         }
     }
-    if (engPrefix !== null) {
+    if (content === ".시세봇" || content === ".시세명령어") {
+        logCommand(msg, "도움말", "");
+        msg.reply(
+            "시세 명령어\n" +
+            "\n[재료·아이템 시세]\n" +
+            ".재료 / .시세 / .템 — 재련 재료 시세\n" +
+            ".유각 [각인명] — 유물 각인서 시세\n" +
+            ".보석 [레벨][겁/작] — 보석 시세\n" +
+            ".파괴석 / .재봉술 — 개별 감시 아이템\n" +
+            "\n[악세 시세]\n" +
+            ".상상 / .상중 / .중중 등\n" +
+            "  (상/중/하 또는 ㅅ/ㅈ/ㅎ 두 글자)\n" +
+            ".악세 — 상상 악세 현재 매물 조회\n" +
+            ".악세 <목걸이|반지> <기준> — 기준별 필터 조회\n" +
+            "\n[상상 악세 알림]\n" +
+            ".악세알림켜기 / .악세알림끄기\n" +
+            ".기준 <목걸이|반지> <기준> <가격>\n" +
+            "  기준: 풀스탯/무공/최생/품질/특수\n" +
+            "  예) .기준 반지 풀스탯 230만\n" +
+            "\n[경매장 시세 알림]\n" +
+            ".시세알림켜기 / .시세알림끄기"
+        );
+    }
+
+    else if (engPrefix !== null) {
         const engArg = content.slice(engPrefix.length).trim();
         logCommand(msg, "유각 시세 조회", engArg);
         try {
@@ -926,7 +1067,7 @@ bot.addListener(Event.MESSAGE, (msg) => {
             const ACC_CATEGORIES = [
                 { label: "목걸이", code: 200010 },
                 { label: "귀걸이", code: 200020 },
-                { label: "반지",   code: 200030 }
+                { label: "반지", code: 200030 }
             ];
 
             for (const cat of ACC_CATEGORIES) {
@@ -975,9 +1116,73 @@ bot.addListener(Event.MESSAGE, (msg) => {
     }
 
     // 상상 악세 현재 매물 조회
-    else if (content === ".악세") {
-        logCommand(msg, "상상 악세 시세 조회", "");
+    // .악세               → 목걸이·반지 최저가 3개씩 전체 출력
+    // .악세 <악세> <기준> → 해당 기준에 맞는 매물만 필터링해서 출력
+    else if (content === ".악세" || content.startsWith(".악세 ")) {
+        const accArgs = content.slice(".악세".length).trim();
+        const accArgParts = accArgs ? accArgs.split(/\s+/) : [];
+        const accKeyArg = accArgParts[0] || null;
+        const accCritArg = accArgParts[1] || null;
+        logCommand(msg, "상상 악세 시세 조회", accArgs);
         try {
+            // 기준 필터링 모드 (.악세 반지 풀스탯 / .악세 목걸이 무공 등)
+            if (accKeyArg && accCritArg) {
+                const accItem = ACC_ALERT_ITEMS.find(i => i.key === accKeyArg);
+                if (!accItem) {
+                    msg.reply("⚠️ 알 수 없는 악세 키워드입니다. (목걸이, 반지)");
+                    return;
+                }
+                const crit = accItem.criteria.find(c => c.key === accCritArg);
+                if (!crit) {
+                    const keys = accItem.criteria.map(c => c.key).join(", ");
+                    msg.reply(`⚠️ 알 수 없는 기준입니다. (${keys})`);
+                    return;
+                }
+
+                const MAX_QUERY_PAGES = 3;
+                const matched = [];
+                for (let page = 1; page <= MAX_QUERY_PAGES && matched.length < 3; page++) {
+                    const result = fetchAccItems(accItem, page);
+                    if (!result.ok) {
+                        if (result.code === 401) {
+                            msg.reply("⚠️ API 키가 만료되었거나 올바르지 않습니다.");
+                            return;
+                        }
+                        break;
+                    }
+                    if (result.items.length === 0) break;
+                    for (const it of result.items) {
+                        if (matchesAccCriterion(it, crit)) matched.push(it);
+                        if (matched.length >= 3) break;
+                    }
+                    if (result.items.length < 10) break;
+                }
+
+                const th = getAccThreshold(accItem.key, crit.key);
+                const thStr = th ? ` / 기준가 ${formatNumber(th)}` : "";
+                const header = `[${accItem.label}]\n기준: ${crit.label}${thStr}`;
+
+                if (matched.length === 0) {
+                    msg.reply(`${header}\n\n매물 없음 (${MAX_QUERY_PAGES}페이지 내)`);
+                    return;
+                }
+                msg.reply(`${header}\n\n${matched.map(formatAccItem).join("\n\n---\n\n")}`);
+                return;
+            }
+
+            // 악세명만 입력한 경우 힌트
+            if (accKeyArg && !accCritArg) {
+                const accItem = ACC_ALERT_ITEMS.find(i => i.key === accKeyArg);
+                if (accItem) {
+                    const keys = accItem.criteria.map(c => c.key).join(", ");
+                    msg.reply(`⚠️ 기준을 함께 입력해주세요.\n예) .악세 ${accKeyArg} 풀스탯\n기준: ${keys}`);
+                } else {
+                    msg.reply("⚠️ 알 수 없는 악세 키워드입니다. (목걸이, 반지)");
+                }
+                return;
+            }
+
+            // 기존 동작: 악세 전체 최저가 조회
             const sections = [];
             let isSuccess = true;
 
@@ -997,9 +1202,12 @@ bot.addListener(Event.MESSAGE, (msg) => {
                     continue;
                 }
 
-                const threshold = config.ACC_ALERT_THRESHOLDS && config.ACC_ALERT_THRESHOLDS[accItem.key];
-                const headerLine = threshold
-                    ? `[${accItem.label}] 기준: ${formatNumber(threshold)}`
+                const sub = config.ACC_ALERT_THRESHOLDS && config.ACC_ALERT_THRESHOLDS[accItem.key];
+                const setList = (sub && typeof sub === "object")
+                    ? Object.keys(sub).filter(k => sub[k]).map(k => `${k} ${formatNumber(sub[k])}`).join(", ")
+                    : "";
+                const headerLine = setList
+                    ? `[${accItem.label}] 기준: ${setList}`
                     : `[${accItem.label}]`;
 
                 const limit = Math.min(result.items.length, 3);
@@ -1028,9 +1236,13 @@ bot.addListener(Event.MESSAGE, (msg) => {
             }
             const t = config.ACC_ALERT_THRESHOLDS || {};
             const thresholdInfo = ACC_ALERT_ITEMS
-                .map(i => `${i.key}: ${t[i.key] ? formatNumber(t[i.key]) : "미설정"}`)
-                .join(", ");
-            msg.reply(`✅ 이 방에서 상상 악세 알림을 받습니다.\n현재 기준가 — ${thresholdInfo}`);
+                .map(i => {
+                    const sub = t[i.key];
+                    const set = (sub && typeof sub === "object") ? Object.keys(sub).filter(k => sub[k]) : [];
+                    return `${i.key}: ${set.length ? set.join("/") : "미설정"}`;
+                })
+                .join("\n");
+            msg.reply(`✅ 이 방에서 상상 악세 알림을 받습니다.\n현재 기준 —\n${thresholdInfo}`);
         } catch (e) {
             Log.e(`[Script Error - 악세알림켜기] ${e.stack}`);
             msg.reply("앗차차! 악세 알림 등록 중 오류가 발생했어요.");
@@ -1052,15 +1264,16 @@ bot.addListener(Event.MESSAGE, (msg) => {
         }
     }
 
-    // 상상 악세 기준가 설정 (.기준 목걸이 160만 / .기준 반지 50만)
+    // 상상 악세 기준가 설정 (.기준 반지 풀스탯 230만 / .기준 목걸이 특수 500만)
     else if (content.startsWith(".기준")) {
         const parts = content.split(/\s+/);
         const keyArg = parts[1];
-        const priceArg = parts[2];
-        logCommand(msg, "악세 기준가 설정", `${keyArg || ""} ${priceArg || ""}`);
+        const critArg = parts[2];
+        const priceArg = parts[3];
+        logCommand(msg, "악세 기준가 설정", `${keyArg || ""} ${critArg || ""} ${priceArg || ""}`);
         try {
-            if (!keyArg || !priceArg) {
-                msg.reply("⚠️ 사용법: .기준 목걸이 160만 / .기준 반지 50만");
+            if (!keyArg || !critArg || !priceArg) {
+                msg.reply("⚠️ 사용법: .기준 <목걸이|반지> <풀스탯|무공|최생|품질|특수> <가격>\n예: .기준 반지 풀스탯 230만");
                 return;
             }
             const targetItem = ACC_ALERT_ITEMS.find(i => i.key === keyArg);
@@ -1068,15 +1281,24 @@ bot.addListener(Event.MESSAGE, (msg) => {
                 msg.reply(`⚠️ 알 수 없는 악세 키워드입니다. (목걸이, 반지)`);
                 return;
             }
+            const crit = targetItem.criteria.find(c => c.key === critArg);
+            if (!crit) {
+                const keys = targetItem.criteria.map(c => c.key).join(", ");
+                msg.reply(`⚠️ 알 수 없는 기준입니다. (${keys})`);
+                return;
+            }
             const price = parsePrice(priceArg);
             if (!price) {
-                msg.reply("⚠️ 올바른 가격 형식이 아닙니다. (예: .기준 목걸이 160만)");
+                msg.reply("⚠️ 올바른 가격 형식이 아닙니다. (예: .기준 반지 풀스탯 230만)");
                 return;
             }
             if (!config.ACC_ALERT_THRESHOLDS) config.ACC_ALERT_THRESHOLDS = {};
-            config.ACC_ALERT_THRESHOLDS[targetItem.key] = price;
+            if (typeof config.ACC_ALERT_THRESHOLDS[targetItem.key] !== "object" || config.ACC_ALERT_THRESHOLDS[targetItem.key] === null) {
+                config.ACC_ALERT_THRESHOLDS[targetItem.key] = {};
+            }
+            config.ACC_ALERT_THRESHOLDS[targetItem.key][crit.key] = price;
             safeWriteJson(CONFIG_PATH, config);
-            msg.reply(`✅ ${targetItem.label} 기준가를 ${formatNumber(price)}(으)로 설정했습니다.`);
+            msg.reply(`✅ ${targetItem.label}\n[${crit.label}] 기준가를 ${formatNumber(price)}(으)로 설정했습니다.`);
         } catch (e) {
             Log.e(`[Script Error - 기준 설정] ${e.stack}`);
             msg.reply("앗차차! 기준가 설정 중 오류가 발생했어요.");
