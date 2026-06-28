@@ -351,8 +351,8 @@ const ACC_ALERT_ITEMS = [
         opt2: 43, v2: 600,
         criteria: [
             { key: "풀스탯", label: "메인스탯 17300", statMin: 17150, statMax: 17450, apiOpt: { "FirstOption": 1, "SecondOption": 11, "MinValue": 17150 } },
-            { key: "무공",   label: "메인스탯 16300 + 무공+195↑", statMin: 16150, statMax: 16450, mugong: 195,   apiOpt: { "FirstOption": 7, "SecondOption": 54, "MinValue": 195 } },
-            { key: "최생",   label: "메인스탯 16300 + 최생3250↑", statMin: 16150, statMax: 16450, cgsaeng: 3250, apiOpt: { "FirstOption": 7, "SecondOption": 55, "MinValue": 3250 } },
+            { key: "무공",   label: "메인스탯 16300 + 무공+195↑", statMin: 16150, statMax: 16450, mugong: 195,   apiOpt: { "FirstOption": 7, "SecondOption": 54, "MinValue": 195,  "MaxValue": 960  } },
+            { key: "최생",   label: "메인스탯 16300 + 최생3250↑", statMin: 16150, statMax: 16450, cgsaeng: 3250, apiOpt: { "FirstOption": 7, "SecondOption": 55, "MinValue": 3250, "MaxValue": 6500 } },
             { key: "품질",   label: "품질 90↑", quality: 90, apiQuality: 90 },
             { key: "특수",   label: "무공+480↑ / 최생6500↑", mugong: 480, cgsaeng: 6500, special: true }
         ]
@@ -365,8 +365,8 @@ const ACC_ALERT_ITEMS = [
         opt2: 52, v2: 750,
         criteria: [
             { key: "풀스탯", label: "메인스탯 12500", statMin: 12350, statMax: 12650, apiOpt: { "FirstOption": 1, "SecondOption": 11, "MinValue": 12350 } },
-            { key: "무공",   label: "메인스탯 11500 + 무공+195↑", statMin: 11350, statMax: 11650, mugong: 195,   apiOpt: { "FirstOption": 7, "SecondOption": 54, "MinValue": 195 } },
-            { key: "최생",   label: "메인스탯 11500 + 최생3250↑", statMin: 11350, statMax: 11650, cgsaeng: 3250, apiOpt: { "FirstOption": 7, "SecondOption": 55, "MinValue": 3250 } },
+            { key: "무공",   label: "메인스탯 11500 + 무공+195↑", statMin: 11350, statMax: 11650, mugong: 195,   apiOpt: { "FirstOption": 7, "SecondOption": 54, "MinValue": 195,  "MaxValue": 960  } },
+            { key: "최생",   label: "메인스탯 11500 + 최생3250↑", statMin: 11350, statMax: 11650, cgsaeng: 3250, apiOpt: { "FirstOption": 7, "SecondOption": 55, "MinValue": 3250, "MaxValue": 6500 } },
             { key: "품질",   label: "품질 90↑", quality: 90, apiQuality: 90 },
             { key: "특수",   label: "무공+480↑ / 최생6500↑", mugong: 480, cgsaeng: 6500, special: true }
         ]
@@ -442,8 +442,8 @@ function fetchAccItemsByCrit(accItem, crit, pageNo) {
     }
 
     if (crit.special) {
-        const r1 = doFetch(baseOpts.concat([{ "FirstOption": 7, "SecondOption": 54, "MinValue": crit.mugong }]), 67, 1);
-        const r2 = doFetch(baseOpts.concat([{ "FirstOption": 7, "SecondOption": 55, "MinValue": crit.cgsaeng }]), 67, 1);
+        const r1 = doFetch(baseOpts.concat([{ "FirstOption": 7, "SecondOption": 54, "MinValue": crit.mugong, "MaxValue": 960  }]), 67, 1);
+        const r2 = doFetch(baseOpts.concat([{ "FirstOption": 7, "SecondOption": 55, "MinValue": crit.cgsaeng, "MaxValue": 6500 }]), 67, 1);
         const items = (r1.ok ? r1.items : []).concat(r2.ok ? r2.items : [])
             .sort(function(a, b) { return a.AuctionInfo.BuyPrice - b.AuctionInfo.BuyPrice; });
         return { ok: r1.ok || r2.ok, items: items, code: 200 };
