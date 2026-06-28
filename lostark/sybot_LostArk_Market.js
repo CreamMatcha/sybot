@@ -350,9 +350,9 @@ const ACC_ALERT_ITEMS = [
         opt1: 44, v1: 800,
         opt2: 43, v2: 600,
         criteria: [
-            { key: "풀스탯", label: "메인스탯 17300", statMin: 17150, statMax: 17450, apiOpt: { "FirstOption": 1, "SecondOption": 11, "MinValue": 17150 } },
-            { key: "무공",   label: "메인스탯 16300 + 무공+195↑", statMin: 16150, statMax: 16450, mugong: 195,   apiOpt: { "FirstOption": 7, "SecondOption": 54, "MinValue": 195,  "MaxValue": 960  } },
-            { key: "최생",   label: "메인스탯 16300 + 최생3250↑", statMin: 16150, statMax: 16450, cgsaeng: 3250, apiOpt: { "FirstOption": 7, "SecondOption": 55, "MinValue": 3250, "MaxValue": 6500 } },
+            { key: "풀스탯", label: "메인스탯 17300↑", statMin: 17300, apiOpt: { "FirstOption": 1, "SecondOption": 11, "MinValue": 17300 } },
+            { key: "무공",   label: "메인스탯 16300↑ + 무공+195↑", statMin: 16300, mugong: 195,   apiOpt: { "FirstOption": 7, "SecondOption": 54, "MinValue": 195,  "MaxValue": 960  } },
+            { key: "최생",   label: "메인스탯 16300↑ + 최생3250↑", statMin: 16300, cgsaeng: 3250, apiOpt: { "FirstOption": 7, "SecondOption": 55, "MinValue": 3250, "MaxValue": 6500 } },
             { key: "품질",   label: "품질 90↑", quality: 90, apiQuality: 90 },
             { key: "특수",   label: "무공+480↑ / 최생6500↑", mugong: 480, cgsaeng: 6500, special: true }
         ]
@@ -364,9 +364,9 @@ const ACC_ALERT_ITEMS = [
         opt1: 51, v1: 500,
         opt2: 52, v2: 750,
         criteria: [
-            { key: "풀스탯", label: "메인스탯 12500", statMin: 12350, statMax: 12650, apiOpt: { "FirstOption": 1, "SecondOption": 11, "MinValue": 12350 } },
-            { key: "무공",   label: "메인스탯 11500 + 무공+195↑", statMin: 11350, statMax: 11650, mugong: 195,   apiOpt: { "FirstOption": 7, "SecondOption": 54, "MinValue": 195,  "MaxValue": 960  } },
-            { key: "최생",   label: "메인스탯 11500 + 최생3250↑", statMin: 11350, statMax: 11650, cgsaeng: 3250, apiOpt: { "FirstOption": 7, "SecondOption": 55, "MinValue": 3250, "MaxValue": 6500 } },
+            { key: "풀스탯", label: "메인스탯 12500↑", statMin: 12500, apiOpt: { "FirstOption": 1, "SecondOption": 11, "MinValue": 12500 } },
+            { key: "무공",   label: "메인스탯 11500↑ + 무공+195↑", statMin: 11500, mugong: 195,   apiOpt: { "FirstOption": 7, "SecondOption": 54, "MinValue": 195,  "MaxValue": 960  } },
+            { key: "최생",   label: "메인스탯 11500↑ + 최생3250↑", statMin: 11500, cgsaeng: 3250, apiOpt: { "FirstOption": 7, "SecondOption": 55, "MinValue": 3250, "MaxValue": 6500 } },
             { key: "품질",   label: "품질 90↑", quality: 90, apiQuality: 90 },
             { key: "특수",   label: "무공+480↑ / 최생6500↑", mugong: 480, cgsaeng: 6500, special: true }
         ]
@@ -540,7 +540,7 @@ function matchesAccCriterion(item, c) {
         return item.GradeQuality >= c.quality;
     }
     const stat = accStatValue(item);
-    if (stat < c.statMin || stat > c.statMax) return false;
+    if (stat < c.statMin) return false;
     if (c.mugong !== undefined) return accHasMugong(item, c.mugong);
     if (c.cgsaeng !== undefined) return accHasCgsaeng(item, c.cgsaeng);
     return true; // 풀스탯: 메인스탯 범위만 확인
