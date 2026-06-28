@@ -1331,6 +1331,22 @@ bot.addListener(Event.MESSAGE, (msg) => {
         }
     }
 
+    // 상상 악세 기준가 현황 조회
+    else if (content === ".기준확인") {
+        logCommand(msg, "악세 기준가 현황", "");
+        const t = config.ACC_ALERT_THRESHOLDS || {};
+        const lines = ["악세 기준가 현황"];
+        for (const item of ACC_ALERT_ITEMS) {
+            lines.push(`\n[${item.label}]`);
+            const sub = (t[item.key] && typeof t[item.key] === "object") ? t[item.key] : {};
+            for (const c of item.criteria) {
+                const th = sub[c.key];
+                lines.push(`${c.key} (${c.label}): ${th ? formatNumber(th) : "미설정"}`);
+            }
+        }
+        msg.reply(lines.join("\n"));
+    }
+
     // 상상 악세 기준가 설정 (.기준 반지 풀스탯 230만 / .기준 목걸이 특수 500만)
     else if (content.startsWith(".기준")) {
         const parts = content.split(/\s+/);
