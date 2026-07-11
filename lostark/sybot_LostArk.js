@@ -1315,6 +1315,13 @@ function formatGoldIslands(dayData) {
  *   maxTradeable  = 거래가능 골드가 가장 큰 3개 레이드 조합
  * @return {object|null} 해당 구간 객체, 최소 구간(1710) 미만이면 null
  */
+// "2026-06-24" -> "6.24" (연도 생략, 월 앞자리 0 제거)
+function formatPatchDate(dateStr) {
+    var m = String(dateStr || "").match(/^\d{4}-(\d{2})-(\d{2})$/);
+    if (!m) return String(dateStr || "");
+    return parseInt(m[1], 10) + "." + parseInt(m[2], 10);
+}
+
 function findWeeklyGoldTier(levelStr) {
     var level = parseFloat(String(levelStr).replace(/,/g, ""));
     if (isNaN(level)) return null;
@@ -1331,7 +1338,7 @@ function findWeeklyGoldTier(levelStr) {
  */
 function renderCharWeeklyGold(charName, levelStr, tier, patchDate) {
     var out = "◦ " + charName + " (" + levelStr + ")의 주급";
-    if (patchDate) out += "\n(" + patchDate + " 패치 기준)";
+    if (patchDate) out += " (" + formatPatchDate(patchDate) + " 기준)";
     out += "\n";
 
     out += "\n총골드 최대: " + formatThousandsSafe(tier.maxTotal.total)
@@ -1402,7 +1409,7 @@ function fetchWeeklyGold(charNameRaw) {
     // 타이틀 (기준 패치 날짜 함께 표시)
     var goldData = loadGameData("weekly_gold.json") || {};
     var out = "◦ " + charName + "의 주급";
-    if (goldData.patchDate) out += " (" + goldData.patchDate + " 패치 기준)";
+    if (goldData.patchDate) out += " (" + formatPatchDate(goldData.patchDate) + " 기준)";
     out += "\n";
     var hasAnyGold = false;
 
@@ -1902,7 +1909,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
         var raidObj = (db.raids || {})[raidName] || {};
         var diffMap = raidObj.difficulties || {};
         var diffs = Object.keys(diffMap);
-        var patchLine = db.patchDate ? "[" + db.patchDate + " 패치 기준]\n" : "";
+        var patchLine = db.patchDate ? "(" + formatPatchDate(db.patchDate) + " 기준)\n" : "";
 
         if (!diff) {
             diffs.sort();
