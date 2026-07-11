@@ -1338,17 +1338,17 @@ function findWeeklyGoldTier(levelStr) {
  */
 function renderCharWeeklyGold(charName, levelStr, tier, patchDate) {
     var out = "◦ " + charName + " (" + levelStr + ")의 주급";
-    if (patchDate) out += " (" + formatPatchDate(patchDate) + " 기준)";
+    if (patchDate) out += "\n(" + formatPatchDate(patchDate) + " 기준)";
     out += "\n";
 
     out += "\n총골드 최대: " + formatThousandsSafe(tier.maxTotal.total)
-        + " (귀속 " + formatThousandsSafe(tier.maxTotal.total - tier.maxTotal.tradeable)
+        + "\n(귀속 " + formatThousandsSafe(tier.maxTotal.total - tier.maxTotal.tradeable)
         + "/유통 " + formatThousandsSafe(tier.maxTotal.tradeable) + ")";
     if (tier.maxTotal.combo) out += "\n└ " + tier.maxTotal.combo;
     out += "\n";
 
     out += "\n유통골드 최대: " + formatThousandsSafe(tier.maxTradeable.total)
-        + " (귀속 " + formatThousandsSafe(tier.maxTradeable.total - tier.maxTradeable.tradeable)
+        + "\n(귀속 " + formatThousandsSafe(tier.maxTradeable.total - tier.maxTradeable.tradeable)
         + "/유통 " + formatThousandsSafe(tier.maxTradeable.tradeable) + ")";
     if (tier.maxTradeable.combo) out += "\n└ " + tier.maxTradeable.combo;
 
@@ -1409,7 +1409,7 @@ function fetchWeeklyGold(charNameRaw) {
     // 타이틀 (기준 패치 날짜 함께 표시)
     var goldData = loadGameData("weekly_gold.json") || {};
     var out = "◦ " + charName + "의 주급";
-    if (goldData.patchDate) out += " (" + formatPatchDate(goldData.patchDate) + " 기준)";
+    if (goldData.patchDate) out += "\n(" + formatPatchDate(goldData.patchDate) + " 기준)";
     out += "\n";
     var hasAnyGold = false;
 
@@ -1445,10 +1445,10 @@ function fetchWeeklyGold(charNameRaw) {
             out += "\n" + details.join("\n") + "\n\n";
             out += "[" + srvName + "]\n";
             out += "총골드 최대: " + formatThousandsSafe(sumTotal)
-                + " (귀속 " + formatThousandsSafe(sumTotal - sumTotalTrade)
+                + "\n(귀속 " + formatThousandsSafe(sumTotal - sumTotalTrade)
                 + "/유통 " + formatThousandsSafe(sumTotalTrade) + ")\n";
             out += "유통골드 최대: " + formatThousandsSafe(sumTrade)
-                + " (귀속 " + formatThousandsSafe(sumTrade - sumTradeTrade)
+                + "\n(귀속 " + formatThousandsSafe(sumTrade - sumTradeTrade)
                 + "/유통 " + formatThousandsSafe(sumTradeTrade) + ")\n";
         }
     }
