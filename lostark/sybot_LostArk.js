@@ -1047,7 +1047,7 @@ function renderArkGridView(model) {
 }
 /***** ─────────────────────────────────────────
  *  레이드 클리어 골드/보상 (.ㅋㄱ / ㅋㄱ)
- *  데이터 파일: sdcard/Sybot/raid_rewards.json
+ *  데이터 파일: /sdcard/Sybot/data/raid_rewards.json
  *  스키마: { version:1, raids: { [레이드명]: { [난이도]: [ {gate,gold,moreGold,clear[],more[]} ] } } }
  * ─────────────────────────────────────────*****/
 

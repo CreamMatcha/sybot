@@ -5,7 +5,7 @@ const ALLOWED_ROOMS = [];
 // [설정] 파일 경로
 const SD_ROOT = FileStream.getSdcardPath();
 const CONFIG_PATH = "/sdcard/Sybot/config.json";
-const FOOD_FILE_PATH = SD_ROOT + "/Sybot/foodList.json";
+const FOOD_FILE_PATH = SD_ROOT + "/Sybot/data/foodList.json";
 
 /** @type {object} 전역 설정 객체 선언 (누락 방지) */
 let config = {};
