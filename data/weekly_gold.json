@@ -1,14 +1,31 @@
 {
-  "version": 1,
+  "version": 2,
+  "patchDate": "2026-06-24",
   "tiers": [
-    { "minLevel": 1750, "gold": 156000 },
-    { "minLevel": 1740, "gold": 148000 },
-    { "minLevel": 1730, "gold": 138000 },
-    { "minLevel": 1720, "gold": 122000 },
-    { "minLevel": 1710, "gold": 108000 },
-    { "minLevel": 1700, "gold": 90000 },
-    { "minLevel": 1690, "gold": 62000 },
-    { "minLevel": 1680, "gold": 55500 },
-    { "minLevel": 1670, "gold": 35200 }
+    {
+      "minLevel": 1750,
+      "maxTotal": { "total": 152000, "tradeable": 102000, "combo": "성당3 + 종막 하드 + 세르카 나이트메어" },
+      "maxTradeable": { "total": 140000, "tradeable": 140000, "combo": "4막 하드 + 종막 하드 + 세르카 나이트메어" }
+    },
+    {
+      "minLevel": 1740,
+      "maxTotal": { "total": 142000, "tradeable": 102000, "combo": "성당2 + 종막 하드 + 세르카 나이트메어" },
+      "maxTradeable": { "total": 140000, "tradeable": 140000, "combo": "4막 하드 + 종막 하드 + 세르카 나이트메어" }
+    },
+    {
+      "minLevel": 1730,
+      "maxTotal": { "total": 132000, "tradeable": 92000, "combo": "성당2 + 종막 하드 + 세르카 하드" },
+      "maxTradeable": { "total": 130000, "tradeable": 130000, "combo": "4막 하드 + 종막 하드 + 세르카 하드" }
+    },
+    {
+      "minLevel": 1720,
+      "maxTotal": { "total": 110000, "tradeable": 54000, "combo": "성당2 + 4막 하드 + 종막 노말" },
+      "maxTradeable": { "total": 102000, "tradeable": 70000, "combo": "4막 하드 + 종막 노말 + 세르카 노말" }
+    },
+    {
+      "minLevel": 1710,
+      "maxTotal": { "total": 94000, "tradeable": 32000, "combo": "성당1 + 종막 노말 + 세르카 노말" },
+      "maxTradeable": { "total": 91000, "tradeable": 45500, "combo": "4막 노말 + 종막 노말 + 세르카 노말" }
+    }
   ]
 }

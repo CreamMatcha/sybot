@@ -1073,21 +1073,29 @@ function findRaidCandidates(db, query) {
     return matched;
 }
 
-function renderRaidBlock(raidName, diff, gates) {
+/**
+ * 레이드 난이도 1개의 클리어 골드 블록 렌더링
+ * @param {object} diffObj { entryLevel(도전레벨), gates: [관문별 골드] }
+ * @param {boolean} boundAll 레이드 단위 전액 귀속 여부 (지평의 성당)
+ * 귀속 규칙: boundAll = 전액 귀속 / 도전레벨 1730 미만 노말 = 절반 귀속 / 그 외 = 전액 유통
+ */
+function renderRaidBlock(raidName, diff, diffObj, boundAll) {
     var res = "◦ " + raidName + " (" + diff + ")\n";
     var totalGold = 0;
-    var totalMoreGold = 0; // 더보기 총합을 담을 변수 추가
+    var gates = (diffObj && diffObj.gates) || [];
 
     for (var i = 0; i < gates.length; i++) {
-        var g = gates[i];
-        res += (i + 1) + "관: " + g.gold + "G (더보기 -" + g.moreGold + "G)\n";
-        totalGold += g.gold;
-        totalMoreGold += g.moreGold; // 각 관문의 더보기 비용을 합산
+        res += (i + 1) + "관: " + formatThousandsSafe(gates[i]) + "G\n";
+        totalGold += gates[i];
     }
 
-    // 총합 옆에 (더보기값을 제한 골드)를 계산하여 표시
-    var netGold = totalGold - totalMoreGold;
-    res += "총합: " + totalGold + "G (" + netGold + "G)";
+    var boundGold = 0;
+    if (boundAll) boundGold = totalGold;
+    else if (diff === "노말" && diffObj.entryLevel < 1730) boundGold = totalGold / 2;
+    var tradeGold = totalGold - boundGold;
+
+    res += "총합: " + formatThousandsSafe(totalGold) + "G (귀속 "
+        + formatThousandsSafe(boundGold) + "/유통 " + formatThousandsSafe(tradeGold) + ")";
 
     return res;
 }
@@ -1301,18 +1309,43 @@ function formatGoldIslands(dayData) {
 }
 
 /**
- * 레벨에 따른 주급(1골드 단위) 계산
- * 구간별 골드는 weekly_gold.json의 tiers(레벨 내림차순)에서 조회
+ * 레벨에 해당하는 주급 구간 반환 (weekly_gold.json의 tiers, 레벨 내림차순)
+ * 각 구간: { minLevel, maxTotal: {total, tradeable}, maxTradeable: {total, tradeable} }
+ *   maxTotal      = 총골드(귀속 포함)가 가장 큰 3개 레이드 조합
+ *   maxTradeable  = 거래가능 골드가 가장 큰 3개 레이드 조합
+ * @return {object|null} 해당 구간 객체, 최소 구간(1710) 미만이면 null
  */
-function calculateGoldForLevel(levelStr) {
+function findWeeklyGoldTier(levelStr) {
     var level = parseFloat(String(levelStr).replace(/,/g, ""));
-    if (isNaN(level)) return 0;
+    if (isNaN(level)) return null;
 
     var tiers = (loadGameData("weekly_gold.json") || {}).tiers || [];
     for (var i = 0; i < tiers.length; i++) {
-        if (level >= tiers[i].minLevel) return tiers[i].gold;
+        if (level >= tiers[i].minLevel) return tiers[i];
     }
-    return 0;
+    return null;
+}
+
+/**
+ * 캐릭터 1명의 주급을 두 기준(레이드 조합 포함)으로 렌더링 (.클골 캐릭터명)
+ */
+function renderCharWeeklyGold(charName, levelStr, tier, patchDate) {
+    var out = "◦ " + charName + " (" + levelStr + ")의 주급";
+    if (patchDate) out += "\n(" + patchDate + " 패치 기준)";
+    out += "\n";
+
+    out += "\n총골드 최대: " + formatThousandsSafe(tier.maxTotal.total)
+        + " (귀속 " + formatThousandsSafe(tier.maxTotal.total - tier.maxTotal.tradeable)
+        + "/유통 " + formatThousandsSafe(tier.maxTotal.tradeable) + ")";
+    if (tier.maxTotal.combo) out += "\n└ " + tier.maxTotal.combo;
+    out += "\n";
+
+    out += "\n유통골드 최대: " + formatThousandsSafe(tier.maxTradeable.total)
+        + " (귀속 " + formatThousandsSafe(tier.maxTradeable.total - tier.maxTradeable.tradeable)
+        + "/유통 " + formatThousandsSafe(tier.maxTradeable.tradeable) + ")";
+    if (tier.maxTradeable.combo) out += "\n└ " + tier.maxTradeable.combo;
+
+    return out;
 }
 
 /**
@@ -1366,8 +1399,11 @@ function fetchWeeklyGold(charNameRaw) {
         return 0;
     });
 
-    // 타이틀 텍스트 변경
-    var out = "◦ " + charName + "의 주급\n";
+    // 타이틀 (기준 패치 날짜 함께 표시)
+    var goldData = loadGameData("weekly_gold.json") || {};
+    var out = "◦ " + charName + "의 주급";
+    if (goldData.patchDate) out += " (" + goldData.patchDate + " 패치 기준)";
+    out += "\n";
     var hasAnyGold = false;
 
     // 각 서버별 주급 계산
@@ -1379,30 +1415,39 @@ function fetchWeeklyGold(charNameRaw) {
         chars.sort(function (a, b) { return b.level - a.level; });
 
         var top6 = chars.slice(0, 6);
-        var serverGold = 0;
+        var sumTotal = 0, sumTotalTrade = 0; // 기준①: 총골드 최대 조합
+        var sumTrade = 0, sumTradeTrade = 0; // 기준②: 유통골드 최대 조합
         var details = [];
 
         for (var k = 0; k < top6.length; k++) {
             var c = top6[k];
-            var g = calculateGoldForLevel(c.level);
-            if (g > 0) {
-                serverGold += g;
+            var tier = findWeeklyGoldTier(c.level);
+            if (tier) {
+                sumTotal += tier.maxTotal.total;
+                sumTotalTrade += tier.maxTotal.tradeable;
+                sumTrade += tier.maxTradeable.total;
+                sumTradeTrade += tier.maxTradeable.tradeable;
                 var compactCls = formatClassCompact(c.cls);
-                // 개별 캐릭터의 추가 골드량 표시 제거
                 details.push("[" + compactCls + "] " + c.name + " (" + c.levelStr + ")");
             }
         }
 
-        if (serverGold > 0) {
+        if (sumTotal > 0) {
             hasAnyGold = true;
-            // 캐릭터 목록 먼저 출력 -> 한 줄 띄우기 -> 서버별 총합 출력
+            // 캐릭터 목록 먼저 출력 -> 한 줄 띄우기 -> 서버별 기준별 총합 출력
             out += "\n" + details.join("\n") + "\n\n";
-            out += "[" + srvName + "] 총 " + formatThousandsSafe(serverGold) + " 골드\n";
+            out += "[" + srvName + "]\n";
+            out += "총골드 최대: " + formatThousandsSafe(sumTotal)
+                + " (귀속 " + formatThousandsSafe(sumTotal - sumTotalTrade)
+                + "/유통 " + formatThousandsSafe(sumTotalTrade) + ")\n";
+            out += "유통골드 최대: " + formatThousandsSafe(sumTrade)
+                + " (귀속 " + formatThousandsSafe(sumTrade - sumTradeTrade)
+                + "/유통 " + formatThousandsSafe(sumTradeTrade) + ")\n";
         }
     }
 
     if (!hasAnyGold) {
-        out += "\n주급을 받을 수 있는 캐릭터(1680 이상)가 없습니다.";
+        out += "\n주급을 받을 수 있는 캐릭터(1710 이상)가 없습니다.";
     }
 
     return { ok: true, content: out.trim() };
@@ -1826,6 +1871,25 @@ bot.addListener(Event.MESSAGE, function (msg) {
 
         var cands = findRaidCandidates(db, raidQuery);
         if (!cands.length) {
+            // 레이드명 매칭 실패 + 난이도 키워드도 없으면 캐릭터명으로 간주 → 캐릭터 주급 조회
+            if (!diff && arg) {
+                try {
+                    var lvStr = fetchProfileItemLevel(arg);
+                    if (lvStr == null) {
+                        msg.reply("'" + arg + "' 레이드/캐릭터를 찾지 못했어요.");
+                        return;
+                    }
+                    var charTier = findWeeklyGoldTier(lvStr);
+                    if (!charTier) {
+                        msg.reply(arg + " (" + lvStr + ")\n주급 대상(1710 이상)이 아니에요.");
+                        return;
+                    }
+                    msg.reply(renderCharWeeklyGold(arg, lvStr, charTier, db.patchDate));
+                } catch (eChar) {
+                    handleApiError(msg, eChar, "캐릭터 주급 조회", arg);
+                }
+                return;
+            }
             msg.reply("해당 레이드를 찾지 못했어요: " + raidQuery);
             return;
         }
@@ -1836,26 +1900,28 @@ bot.addListener(Event.MESSAGE, function (msg) {
 
         var raidName = cands[0];
         var raidObj = (db.raids || {})[raidName] || {};
-        var diffs = Object.keys(raidObj);
+        var diffMap = raidObj.difficulties || {};
+        var diffs = Object.keys(diffMap);
+        var patchLine = db.patchDate ? "[" + db.patchDate + " 패치 기준]\n" : "";
 
         if (!diff) {
             diffs.sort();
             var blocks = [];
             for (var i = 0; i < diffs.length; i++) {
                 var d = diffs[i];
-                blocks.push(renderRaidBlock(raidName, d, raidObj[d] || []));
+                blocks.push(renderRaidBlock(raidName, d, diffMap[d], raidObj.boundAll));
                 if (i < diffs.length - 1) blocks.push("━━━━━━━━━━━━━━");
             }
-            msg.reply(blocks.join("\n"));
+            msg.reply(patchLine + blocks.join("\n"));
             return;
         }
 
-        if (!raidObj[diff]) {
+        if (!diffMap[diff]) {
             msg.reply(raidName + "에 '" + diff + "' 난이도 데이터가 없어요.\n가능: " + diffs.sort().join(", "));
             return;
         }
 
-        msg.reply(renderRaidBlock(raidName, diff, raidObj[diff] || []));
+        msg.reply(patchLine + renderRaidBlock(raidName, diff, diffMap[diff], raidObj.boundAll));
         return;
     }
 
