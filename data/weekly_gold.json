@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "tiers": [
+    { "minLevel": 1750, "gold": 156000 },
+    { "minLevel": 1740, "gold": 148000 },
+    { "minLevel": 1730, "gold": 138000 },
+    { "minLevel": 1720, "gold": 122000 },
+    { "minLevel": 1710, "gold": 108000 },
+    { "minLevel": 1700, "gold": 90000 },
+    { "minLevel": 1690, "gold": 62000 },
+    { "minLevel": 1680, "gold": 55500 },
+    { "minLevel": 1670, "gold": 35200 }
+  ]
+}

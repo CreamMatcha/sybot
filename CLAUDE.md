@@ -64,6 +64,14 @@
 
 
 
+## 게임 데이터 관리 컨벤션
+
+- **순수 게임 데이터는 레포 `data/` 폴더의 JSON으로 관리** (기기에는 `/sdcard/Sybot/data/`로 복사해서 배포)
+  - `engravings.json` (각인 줄임말), `classes.json` (직업별 abbr/weapon), `synergy.json`, `weekly_gold.json`, `guardian_rotation.json`, `raid_rewards.json` (레이드 클골)
+  - 로드: 각 스크립트의 `loadGameData(fileName)` (safeReadJson + 파일별 캐시, init()에서 캐시 초기화)
+  - 새 직업/각인 추가 시 JSON 한 곳만 수정하면 됨
+- **API 코드(옵션 코드, 카테고리 코드)가 섞인 데이터는 코드 상단 상수로 유지** (예: `WATCH_ITEMS`, `ACC_ALERT_ITEMS`, `ACC_PRICE_PAIRS` in sybot_LostArk_Market.js) — 핸들러 안에 데이터를 넣지 말 것
+
 ## 기존 코드 구조 참고
 
 - 로펙 SSR 정적 데이터 조회: Jsoup으로 lopec.kr 직접 파싱 (점수/티어/랭킹 등)

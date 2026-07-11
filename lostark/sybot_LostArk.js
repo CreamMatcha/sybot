@@ -25,10 +25,7 @@ function isAllowedRoom(roomName) {
 var LOSTARK_BASE = "https://developer-lostark.game.onstove.com";
 
 // 파일 경로
-const RAID_REWARD_FILE = "/sdcard/Sybot/raid_rewards.json";
 const CONFIG_PATH = "/sdcard/Sybot/config.json";
-
-let _raidRewardCache = null;
 
 /** @type {object} 전역 설정 객체 선언 (누락 방지) */
 let config = {};
@@ -40,40 +37,27 @@ const LOSTARK_DEFAULT_CONFIG = {
     LOSTARK_API_KEY: "no_API_KEY"
 };
 
-// [설정] 각인서 줄임말 매핑 (정식 명칭 -> 줄임말)
-const ENGRAVING_ABBR = {
-    "결투의 대가": "결대",
-    "구슬동자": "구동",
-    "급소 타격": "급타",
-    "기습의 대가": "기대",
-    "달인의 저력": "달저",
-    "돌격대장": "돌대",
-    "마나의 흐름": "마흐",
-    "마나 효율 증가": "마효증",
-    "바리케이드": "바리",
-    "번개의 분노": "번분",
-    "부러진 뼈": "부뼈",
-    "분쇄의 주먹": "분주",
-    "선수필승": "선필",
-    "속전속결": "속속",
-    "슈퍼 차지": "슈차",
-    "시선 집중": "시집",
-    "실드 관통": "실관",
-    "아드레날린": "아드",
-    "안정된 상태": "안상",
-    "약자 무시": "약무",
-    "에테르 포식자": "에포",
-    "예리한 둔기": "예둔",
-    "위기 모면": "위모",
-    "저주받은 인형": "저받",
-    "정기 흡수": "정흡",
-    "정밀 단도": "정단",
-    "중갑 착용": "중갑",
-    "질량 증가": "질증",
-    "최대 마나 증가": "최마증",
-    "타격의 대가": "타대",
-    "폭발물 전문가": "폭전"
-};
+// [설정] 게임 데이터 JSON 디렉토리 (레포 data/ 폴더의 파일을 기기에 복사해서 사용)
+// engravings.json / classes.json / synergy.json / weekly_gold.json / guardian_rotation.json
+const DATA_DIR = "/sdcard/Sybot/data/";
+
+let _gameDataCache = {};
+
+/**
+ * @description DATA_DIR의 게임 데이터 JSON 파일을 읽어 반환합니다. (파일별 캐시)
+ * @param {string} fileName 파일명 (예: "classes.json")
+ * @return {object|null} 파싱된 객체 또는 실패/파일 없음 시 null
+ */
+function loadGameData(fileName) {
+    if (_gameDataCache[fileName]) return _gameDataCache[fileName];
+    const js = safeReadJson(DATA_DIR + fileName);
+    if (!js) {
+        Log.e("[DATA] 게임 데이터 로드 실패: " + DATA_DIR + fileName);
+        return null;
+    }
+    _gameDataCache[fileName] = js;
+    return js;
+}
 
 /**
  * @description JSON 파일을 읽어 순수 JS 객체로 파싱합니다. (Interop 프록시 객체 생성 방지)
@@ -146,6 +130,7 @@ function loadConfig(filePath, defaultData) {
 
 function init() {
     config = loadConfig(CONFIG_PATH, LOSTARK_DEFAULT_CONFIG);
+    _gameDataCache = {}; // 재컴파일 시 게임 데이터 파일 다시 읽기
     Log.i("[LOA] 설정 로드 완료 (CONFIG_PATH)");
 }
 
@@ -614,7 +599,7 @@ function formatEffects(effects) {
     for (var i = 0; i < effects.length; i++) {
         var eff = effects[i];
         var plain = tooltipToPlainText(eff.Tooltip || "");
-        var m = plain.match(/([+\-]?\d+(?:\.\d+)?)\s*%/);
+        var m = plain.match(/([+-]?\d+(?:\.\d+)?)\s*%/);
         var pct = m ? (m[1] + "%") : plain.replace(eff.Name, "").trim();
         lines.push(eff.Name + " " + eff.Level + "Lv [" + pct + "]");
     }
@@ -727,13 +712,14 @@ function fetchIntegratedInfo(charNameRaw) {
 
         // 5. 아크패시브 각인 (마나 4/전문 3/...)
         var engList = [];
+        var engAbbr = (loadGameData("engravings.json") || {}).abbr || {};
         if (eng.ArkPassiveEffects && eng.ArkPassiveEffects.length > 0) {
             for (var i = 0; i < eng.ArkPassiveEffects.length; i++) {
                 var eff = eng.ArkPassiveEffects[i];
                 // Level이 0일 때 생략되는 문제 해결 (null/undefined만 체크)
                 if (eff.Name && eff.Level != null) {
                     // 줄임말이 있으면 줄임말로, 없으면 기존처럼 앞 2글자로 표기
-                    var engLabel = ENGRAVING_ABBR[eff.Name] || String(eff.Name).substring(0, 2);
+                    var engLabel = engAbbr[eff.Name] || String(eff.Name).substring(0, 2);
                     engList.push(engLabel + eff.Level);
                 }
             }
@@ -926,49 +912,13 @@ function extractFirstPercentFromText(text) {
     return normalizePercentText(m[1]) + "%";
 }
 
-// 직업명 3글자 이하 매핑
-var CLASS_SHORT = {
-    "디스트로이어": "디트",
-    "워로드": "워붕",
-    "버서커": "버섯",
-    "홀리나이트": "홀나",
-    "슬레이어": "슬레",
-    "발키리": "발키리",
-
-    "배틀마스터": "배마",
-    "인파이터": "인파",
-    "기공사": "기공",
-    "창술사": "창술",
-    "스트라이커": "스커",
-    "브레이커": "브커",
-
-    "데빌헌터": "데헌",
-    "블래스터": "블래",
-    "호크아이": "홐홐",
-    "스카우터": "스카",
-    "건슬링어": "건슬",
-
-    "바드": "바드",
-    "서머너": "서머너",
-    "아르카나": "알카",
-    "소서리스": "소서",
-
-    "데모닉": "데모닉",
-    "블레이드": "블레",
-    "리퍼": "리퍼",
-    "소울이터": "소울",
-    "도화가": "아가",
-    "기상술사": "기상",
-    "환수사": "환수사",
-    "가디언나이트": "가나"
-};
-
 /**
- * CLASS_SHORT를 사용하여 직업명을 3글자 폭으로 변환 (GraalJS)
+ * classes.json의 직업 줄임말(abbr)을 사용하여 직업명을 3글자 폭으로 변환 (GraalJS)
  */
 const formatClassCompact = (className) => {
     // 1. 매핑 테이블에서 별명 가져오기 (없으면 원본 사용)
-    let shortName = CLASS_SHORT[className] || className;
+    var classes = (loadGameData("classes.json") || {}).classes || {};
+    let shortName = (classes[className] && classes[className].abbr) || className;
 
     // 2. 2글자인 경우 가운데 공백 추가 (바드 -> 바 드)
     if (shortName.length === 2) {
@@ -1143,26 +1093,15 @@ function renderRaidBlock(raidName, diff, gates) {
 }
 
 function loadRaidRewards() {
-    // 1. 캐시가 존재하면 즉시 반환 (성능 최적화)
-    if (_raidRewardCache) return _raidRewardCache;
+    const js = loadGameData("raid_rewards.json");
 
-    // 2. 파일 경로 설정
-    const path = (typeof RAID_REWARD_FILE !== 'undefined')
-        ? RAID_REWARD_FILE
-        : "/sdcard/Sybot/data/raid_rewards.json";
-
-    // 3. 안전한 파싱 함수(safeReadJson) 사용
-    const js = safeReadJson(path);
-
-    // 4. 데이터 유효성 검사 (파일이 없거나 JSON 형식이 안 맞으면 null 반환)
+    // 데이터 유효성 검사 (파일이 없거나 JSON 형식이 안 맞으면 null 반환)
     if (!js || !js.raids) {
         Log.e("[RAID] Failed to load or invalid JSON format.");
         return null;
     }
 
-    // 5. 캐시에 저장 후 반환
-    _raidRewardCache = js;
-    return _raidRewardCache;
+    return js;
 }
 
 /**
@@ -1218,7 +1157,7 @@ const fetchSiblings = (characterName) => {
                 content += `\n˙◦ ${currentServer} 서버\n`;
             }
 
-            // [적용] 제공해주신 CLASS_SHORT 기반의 컴팩트 포맷
+            // [적용] classes.json의 직업 줄임말 기반 컴팩트 포맷
             const compactClass = formatClassCompact(char.CharacterClassName);
             content += `[${compactClass}] ${char.CharacterName} (${char.ItemAvgLevel})\n`;
         });
@@ -1363,20 +1302,16 @@ function formatGoldIslands(dayData) {
 
 /**
  * 레벨에 따른 주급(1골드 단위) 계산
+ * 구간별 골드는 weekly_gold.json의 tiers(레벨 내림차순)에서 조회
  */
 function calculateGoldForLevel(levelStr) {
     var level = parseFloat(String(levelStr).replace(/,/g, ""));
     if (isNaN(level)) return 0;
 
-    if (level >= 1750) return 156000;
-    if (level >= 1740) return 148000;
-    if (level >= 1730) return 138000;
-    if (level >= 1720) return 122000;
-    if (level >= 1710) return 108000;
-    if (level >= 1700) return 90000;
-    if (level >= 1690) return 62000;
-    if (level >= 1680) return 55500;
-    if (level >= 1670) return 35200
+    var tiers = (loadGameData("weekly_gold.json") || {}).tiers || [];
+    for (var i = 0; i < tiers.length; i++) {
+        if (level >= tiers[i].minLevel) return tiers[i].gold;
+    }
     return 0;
 }
 
@@ -1702,49 +1637,17 @@ function simplifyEquipName(text) {
     return tokens[0] + " " + tokens[tokens.length - 1];
 }
 
-// 클래스별 무기 기본명 (마지막 단어 파싱이 부정확한 경우가 많아 클래스 기준으로 직접 매칭)
-var CLASS_WEAPON_NAME = {
-    "버서커": "대검",
-    "디스트로이어": "망치",
-    "워로드": "랜스",
-    "홀리나이트": "한손검",
-    "슬레이어": "대검",
-    "발키리": "한손검",
-    "배틀마스터": "건틀릿",
-    "인파이터": "헤비 건틀릿",
-    "기공사": "기공패",
-    "창술사": "창",
-    "스트라이커": "건틀릿",
-    "브레이커": "헤비 건틀릿",
-    "데빌헌터": "총",
-    "블래스터": "런처",
-    "호크아이": "활",
-    "스카우터": "서브 머신건",
-    "건슬링어": "총",
-    "아르카나": "마법 덱",
-    "서머너": "스태프",
-    "바드": "하프",
-    "소서리스": "롱 스태프",
-    "데모닉": "데모닉웨폰",
-    "블레이드": "검",
-    "리퍼": "대거",
-    "소울이터": "데스사이드",
-    "도화가": "붓",
-    "기상술사": "우산",
-    "환수사": "두루마리",
-    "차원술사": "시계",
-    "가디언나이트": "할버드"
-};
-
 // 방어구는 실제 아이템명과 무관하게 슬롯 기준 고정 명칭 사용
 var EQUIP_TYPE_DISPLAY_NAME = { "투구": "투구", "어깨": "견갑", "상의": "상의", "하의": "하의", "장갑": "장갑" };
 
-// 무기는 클래스 매칭 우선, 매칭 실패 시 기존 마지막 단어 파싱 방식으로 폴백. 방어구는 슬롯 고정 명칭.
+// 무기는 클래스별 무기 기본명(classes.json의 weapon) 매칭 우선 — 마지막 단어 파싱이 부정확한 경우가 많음.
+// 매칭 실패 시 기존 마지막 단어 파싱 방식으로 폴백. 방어구는 슬롯 고정 명칭.
 function getEquipDisplayName(it, className) {
     var enhance = String(it.text).trim().split(/\s+/)[0];
 
     if (it.type === "무기") {
-        var weaponName = CLASS_WEAPON_NAME[className];
+        var classes = (loadGameData("classes.json") || {}).classes || {};
+        var weaponName = classes[className] && classes[className].weapon;
         if (weaponName) return enhance + " " + weaponName;
         return simplifyEquipName(it.text);
     }
@@ -1850,35 +1753,27 @@ function renderCollectiblesView(model) {
 }
 
 // ==========================================
-// 직업 시너지 데이터 및 처리 함수
+// 직업 시너지 처리 함수 (데이터: synergy.json)
 // ==========================================
-var SYNERGY_DATA = [
-    { category: "전사 (슈샤이어)", content: "워로드(고기): 피증 4, 백헤드 5\n워로드(전태): 방감 12, 피증 4, 백헤드 5\n버서커: 피증 6\n디트: 방감 12\n슬레: 피증 6\n발키리: 치명타 시 적주피 8" },
-    { category: "무도가 (애니츠)", content: "창술: 치명타 시 적주피 8\n배마: 치적 10, 공속 8, 이속 16\n기공: 공증 6, 받피감 25\n인파: 피증 6\n스커: 치적 10, 공속 8\n브커: 피증 6" },
-    { category: "헌터 (아르데타인)", content: "데헌: 치적 10\n호크: 피증 6, 이속 4(두동)\n블래: 방감 12\n스카: 공증 6건슬: 치적 10\n" },
-    { category: "마법사 (실린)", content: "서머너: 방감 12, 마나회복 40 (트포 선택)\n알카: 치적 10\n소서: 피증 6" },
-    { category: "암살자 (데런)", content: "데모닉: 피증 6\n리퍼: 방감 12\n소울: 피증 6\n블레: 피증 4, 백헤드 5, 공속 25, 이속 20" },
-    { category: "스페셜리스트 (요즈)", content: "기상(질풍): 치적 10, 공이속 12\n기상(이슬비): 치적 10, 공감 10\n환수사: 방감 12" },
-    { category: "가디언나이트 (가나)", content: "가디언나이트: 피증 6" },
-    { category: "딜서폿", content: "바드: 방감 12\n도화가: 방감 12\n홀나: 치명타 시 적주피 8" }
-];
-
 function getSynergyText(query) {
+    var synergyData = (loadGameData("synergy.json") || {}).synergy;
+    if (!synergyData || !synergyData.length) return null;
+
     var title = "◦ 직업 시너지";
     var results = [];
     var search = (query || "").trim();
 
     // 검색어가 있는 경우 카테고리에 해당 단어가 포함되어 있는지 확인
     if (search) {
-        for (var i = 0; i < SYNERGY_DATA.length; i++) {
-            if (SYNERGY_DATA[i].category.indexOf(search) !== -1) {
-                results.push(SYNERGY_DATA[i]);
+        for (var i = 0; i < synergyData.length; i++) {
+            if (synergyData[i].category.indexOf(search) !== -1) {
+                results.push(synergyData[i]);
             }
         }
     }
 
     // 검색 결과가 없거나 검색어를 입력하지 않은 경우 전체 출력
-    var targetList = (results.length > 0) ? results : SYNERGY_DATA;
+    var targetList = (results.length > 0) ? results : synergyData;
     var out = [title];
 
     for (var j = 0; j < targetList.length; j++) {
@@ -1912,7 +1807,7 @@ bot.addListener(Event.MESSAGE, function (msg) {
 
         var db = loadRaidRewards();
         if (!db) {
-            msg.reply("레이드 보상 파일을 찾지 못했어요.\n경로: " + RAID_REWARD_FILE);
+            msg.reply("레이드 보상 파일을 찾지 못했어요.\n경로: " + DATA_DIR + "raid_rewards.json");
             return;
         }
 
@@ -2347,7 +2242,11 @@ bot.addListener(Event.MESSAGE, function (msg) {
 
         try {
             var synergyResult = getSynergyText(synergyQuery);
-            msg.reply(synergyResult);
+            if (synergyResult) {
+                msg.reply(synergyResult);
+            } else {
+                msg.reply("시너지 데이터 파일을 찾지 못했어요.\n경로: " + DATA_DIR + "synergy.json");
+            }
         } catch (e) {
             handleApiError(msg, e, "시너지 조회");
         }
@@ -2383,32 +2282,29 @@ bot.addListener(Event.MESSAGE, function (msg) {
     if (matchGato) {
         logCommand(msg, "가토 로테이션 조회", "");
 
-        // 가토 로테이션 순서 배열
-        const guardianRotation = [
-            "루멘칼리고(암구)", // 0
-            "가르가디스(토구)", // 1
-            "스콜라키아(토구)", // 2
-            "크라티오스(뇌구)", // 3
-            "아게오로스(세구)", // 4
-            "드렉탈라스(화구)", // 5
-            "소나벨(암구)",     // 6
-            "베스칼(화구)"      // 7
-        ];
+        // 로테이션 순서/기준일은 guardian_rotation.json에서 로드
+        // (anchorDate 주차의 가디언 = rotation[anchorIndex])
+        const rotationData = loadGameData("guardian_rotation.json");
+        if (!rotationData || !rotationData.rotation || !rotationData.rotation.length) {
+            msg.reply("가토 로테이션 데이터 파일을 찾지 못했어요.\n경로: " + DATA_DIR + "guardian_rotation.json");
+            return;
+        }
+        const guardianRotation = rotationData.rotation;
+        const rotationLen = guardianRotation.length;
 
-        // 기준일: 2026년 4월 15일 수요일 오전 6시 (소나벨 주간)
-        const anchorDate = new Date("2026-04-15T06:00:00+09:00").getTime();
+        const anchorDate = new Date(rotationData.anchorDate).getTime();
         const now = new Date().getTime();
 
         // 기준일로부터 경과한 주(Week) 수 계산
         const msPerWeek = 7 * 24 * 60 * 60 * 1000;
         const diffWeeks = Math.floor((now - anchorDate) / msPerWeek);
 
-        // 현재 주차의 가디언 인덱스 (소나벨 인덱스 6 기준)
-        const currentIndex = (((6 + diffWeeks) % 8) + 8) % 8;
+        // 현재 주차의 가디언 인덱스
+        const currentIndex = (((rotationData.anchorIndex + diffWeeks) % rotationLen) + rotationLen) % rotationLen;
         const targetGuardian = guardianRotation[currentIndex];
 
         // 다음 주차의 가디언 인덱스 계산 (현재 인덱스 + 1)
-        const nextIndex = (currentIndex + 1) % 8;
+        const nextIndex = (currentIndex + 1) % rotationLen;
         const nextGuardian = guardianRotation[nextIndex];
 
         // 출력 형식 업데이트

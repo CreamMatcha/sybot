@@ -29,40 +29,34 @@ const MAIN_DEFAULT_CONFIG = {
     ACC_ALERT_THRESHOLDS: { "목걸이": {}, "반지": {} } // 악세별·기준별 기준가
 };
 
-// [설정] 각인서 줄임말 매핑 (정식 명칭 -> 줄임말)
-const ENGRAVING_ABBR = {
-    "결투의 대가": "결대",
-    "구슬동자": "구동",
-    "급소 타격": "급타",
-    "기습의 대가": "기대",
-    "달인의 저력": "달저",
-    "돌격대장": "돌대",
-    "마나의 흐름": "마흐",
-    "마나 효율 증가": "마효증",
-    "바리케이드": "바리",
-    "번개의 분노": "번분",
-    "부러진 뼈": "부뼈",
-    "분쇄의 주먹": "분주",
-    "선수필승": "선필",
-    "속전속결": "속속",
-    "슈퍼 차지": "슈차",
-    "시선 집중": "시집",
-    "실드 관통": "실관",
-    "아드레날린": "아드",
-    "안정된 상태": "안상",
-    "약자 무시": "약무",
-    "에테르 포식자": "에포",
-    "예리한 둔기": "예둔",
-    "위기 모면": "위모",
-    "저주받은 인형": "저받",
-    "정기 흡수": "정흡",
-    "정밀 단도": "정단",
-    "중갑 착용": "중갑",
-    "질량 증가": "질증",
-    "최대 마나 증가": "최마증",
-    "타격의 대가": "타대",
-    "폭발물 전문가": "폭전"
-};
+// [설정] 게임 데이터 JSON 디렉토리 (레포 data/ 폴더의 파일을 기기에 복사해서 사용)
+const DATA_DIR = "/sdcard/Sybot/data/";
+
+let _gameDataCache = {};
+
+/**
+ * @description DATA_DIR의 게임 데이터 JSON 파일을 읽어 반환합니다. (파일별 캐시)
+ * @param {string} fileName 파일명 (예: "engravings.json")
+ * @return {object|null} 파싱된 객체 또는 실패/파일 없음 시 null
+ */
+function loadGameData(fileName) {
+    if (_gameDataCache[fileName]) return _gameDataCache[fileName];
+    const js = safeReadJson(DATA_DIR + fileName);
+    if (!js) {
+        Log.e(`[DATA] 게임 데이터 로드 실패: ${DATA_DIR}${fileName}`);
+        return null;
+    }
+    _gameDataCache[fileName] = js;
+    return js;
+}
+
+/**
+ * @description 각인서 줄임말 매핑 (정식 명칭 -> 줄임말, engravings.json)
+ * @returns {object}
+ */
+function getEngravingAbbrMap() {
+    return (loadGameData("engravings.json") || {}).abbr || {};
+}
 
 /**
  * @description 입력값(줄임말 또는 이름 일부)을 거래소 검색용 각인 이름으로 변환합니다.
@@ -72,8 +66,9 @@ const ENGRAVING_ABBR = {
 function resolveEngravingName(input) {
     const q = String(input).trim();
     // 1. 줄임말과 정확히 일치하면 정식 명칭으로 변환
-    for (const fullName in ENGRAVING_ABBR) {
-        if (ENGRAVING_ABBR[fullName] === q) return fullName;
+    const abbrMap = getEngravingAbbrMap();
+    for (const fullName in abbrMap) {
+        if (abbrMap[fullName] === q) return fullName;
     }
     // 2. 그 외에는 입력값 그대로 사용 (API가 부분 일치로 검색)
     return q;
@@ -150,6 +145,7 @@ function loadConfig(filePath, defaultData) {
 
 function init() {
     config = loadConfig(CONFIG_PATH, MAIN_DEFAULT_CONFIG);
+    _gameDataCache = {}; // 재컴파일 시 게임 데이터 파일 다시 읽기
     Log.i("설정 로드 완료!");
 }
 
@@ -750,6 +746,54 @@ function fetchSectionLines(queries) {
 }
 
 
+/* ==================== [상중하 악세 시세] ==================== */
+
+// .상상/.상중 등에서 쓰는 등급 문자 → 등급명 매핑
+const ACC_GRADE_MAP = { "상": "상", "중": "중", "하": "하", "ㅅ": "상", "ㅈ": "중", "ㅎ": "하" };
+
+// 검색할 악세 옵션 조합 정의
+// API의 MinValue, MaxValue는 정수 형태를 요구하므로 (예: 2.00% -> 200) 수치를 변환해 두었습니다.
+const ACC_PRICE_PAIRS = [
+    {
+        name1: "적주피", opt1: 42, val1: { "하": 55, "중": 120, "상": 200 },
+        name2: "추피", opt2: 41, val2: { "하": 70, "중": 160, "상": 260 },
+        category: 200010
+    },
+    {
+        name1: "낙인력", opt1: 44, val1: { "하": 215, "중": 480, "상": 800 },
+        name2: "아덴", opt2: 43, val2: { "하": 160, "중": 360, "상": 600 },
+        category: 200010
+    },
+    {
+        name1: "공%", opt1: 45, val1: { "하": 40, "중": 95, "상": 155 },
+        name2: "무공%", opt2: 46, val2: { "하": 80, "중": 180, "상": 300 },
+        category: 200020
+    },
+    {
+        name1: "무공%", opt1: 46, val1: { "하": 80, "중": 180, "상": 300 },
+        name2: "무공+", opt2: 54, val2: { "하": 195, "중": 480, "상": 960 },
+        category: 200020, specialRule: "무공+"
+    },
+    {
+        name1: "아공", opt1: 51, val1: { "하": 135, "중": 300, "상": 500 },
+        name2: "아피", opt2: 52, val2: { "하": 200, "중": 450, "상": 750 },
+        category: 200030
+    },
+    {
+        name1: "치적", opt1: 49, val1: { "하": 40, "중": 95, "상": 155 },
+        name2: "치피", opt2: 50, val2: { "하": 110, "중": 240, "상": 400 },
+        category: 200030
+    }
+];
+
+// 악세 카테고리 (출력 그룹 순서)
+const ACC_CATEGORIES = [
+    { label: "목걸이", code: 200010 },
+    { label: "귀걸이", code: 200020 },
+    { label: "반지", code: 200030 }
+];
+
+
 /* ==================== [이벤트 핸들러] ==================== */
 
 /**
@@ -848,6 +892,7 @@ bot.addListener(Event.MESSAGE, (msg) => {
 
                 let resultMsg = "유각 시세\n";
                 const limit = Math.min(items.length, 10);
+                const engAbbrMap = getEngravingAbbrMap();
 
                 for (let i = 0; i < limit; i++) {
                     const item = items[i];
@@ -858,7 +903,7 @@ bot.addListener(Event.MESSAGE, (msg) => {
                         .trim();
 
                     // 줄임말이 있으면 줄임말로 표기
-                    const displayName = ENGRAVING_ABBR[cleanName] || cleanName;
+                    const displayName = engAbbrMap[cleanName] || cleanName;
                     const price = formatNumber(item.CurrentMinPrice);
                     resultMsg += `\n${displayName}: ${price}`;
                 }
@@ -1047,10 +1092,9 @@ bot.addListener(Event.MESSAGE, (msg) => {
     else if (/^\.(상|중|하|ㅅ|ㅈ|ㅎ)(상|중|하|ㅅ|ㅈ|ㅎ)$/.test(content)) {
         logCommand(msg, "악세 시세 조회", content);
         try {
-            const GRADE_MAP = { "상": "상", "중": "중", "하": "하", "ㅅ": "상", "ㅈ": "중", "ㅎ": "하" };
             const match = content.match(/^\.(상|중|하|ㅅ|ㅈ|ㅎ)(상|중|하|ㅅ|ㅈ|ㅎ)$/);
-            const lvl1 = GRADE_MAP[match[1]];
-            const lvl2 = GRADE_MAP[match[2]];
+            const lvl1 = ACC_GRADE_MAP[match[1]];
+            const lvl2 = ACC_GRADE_MAP[match[2]];
 
             const url = "https://developer-lostark.game.onstove.com/auctions/items";
             const headers = {
@@ -1058,41 +1102,6 @@ bot.addListener(Event.MESSAGE, (msg) => {
                 "authorization": `bearer ${config.LOSTARK_API_KEY}`,
                 "Content-Type": "application/json"
             };
-
-            // 검색할 악세 옵션 조합 정의
-            // API의 MinValue, MaxValue는 정수 형태를 요구하므로 (예: 2.00% -> 200) 제시해주신 수치를 변환해 두었습니다.
-            const accPairs = [
-                {
-                    name1: "적주피", opt1: 42, val1: { "하": 55, "중": 120, "상": 200 },
-                    name2: "추피", opt2: 41, val2: { "하": 70, "중": 160, "상": 260 },
-                    category: 200010
-                },
-                {
-                    name1: "낙인력", opt1: 44, val1: { "하": 215, "중": 480, "상": 800 },
-                    name2: "아덴", opt2: 43, val2: { "하": 160, "중": 360, "상": 600 },
-                    category: 200010
-                },
-                {
-                    name1: "공%", opt1: 45, val1: { "하": 40, "중": 95, "상": 155 },
-                    name2: "무공%", opt2: 46, val2: { "하": 80, "중": 180, "상": 300 },
-                    category: 200020
-                },
-                {
-                    name1: "무공%", opt1: 46, val1: { "하": 80, "중": 180, "상": 300 },
-                    name2: "무공+", opt2: 54, val2: { "하": 195, "중": 480, "상": 960 },
-                    category: 200020, specialRule: "무공+"
-                },
-                {
-                    name1: "아공", opt1: 51, val1: { "하": 135, "중": 300, "상": 500 },
-                    name2: "아피", opt2: 52, val2: { "하": 200, "중": 450, "상": 750 },
-                    category: 200030
-                },
-                {
-                    name1: "치적", opt1: 49, val1: { "하": 40, "중": 95, "상": 155 },
-                    name2: "치피", opt2: 50, val2: { "하": 110, "중": 240, "상": 400 },
-                    category: 200030
-                }
-            ];
 
             let resultMsg = `${lvl1}${lvl2} 악세 시세`;
             let isSuccess = true;
@@ -1130,17 +1139,11 @@ bot.addListener(Event.MESSAGE, (msg) => {
             };
 
             // 카테고리별로 그룹화하여 출력
-            const ACC_CATEGORIES = [
-                { label: "목걸이", code: 200010 },
-                { label: "귀걸이", code: 200020 },
-                { label: "반지", code: 200030 }
-            ];
-
             for (const cat of ACC_CATEGORIES) {
                 if (!isSuccess) break;
                 const catPairLines = [];
 
-                for (const pair of accPairs) {
+                for (const pair of ACC_PRICE_PAIRS) {
                     if (!isSuccess) break;
                     if (pair.category !== cat.code) continue;
 
@@ -1464,7 +1467,7 @@ bot.addListener(Event.MESSAGE, (msg) => {
     }
 });
 
-// 경매장/악세 시세 알림 주기 체크 시작 (3분 간격)
+// 경매장/악세 시세 알림 주기 체크 시작 (MARKET_CHECK_INTERVAL_MS 간격)
 checkMarketAlerts();
 checkAccAlerts();
 setInterval(function () { checkMarketAlerts(); checkAccAlerts(); }, MARKET_CHECK_INTERVAL_MS);
