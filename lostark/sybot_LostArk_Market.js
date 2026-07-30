@@ -26,7 +26,7 @@ const MAIN_DEFAULT_CONFIG = {
     LOSTARK_API_KEY: "no_API_KEY",
     MARKET_ALERT_ROOMS: [], // .시세알림켜기 명령어로 등록된, 알림을 받을 방 목록
     ACC_ALERT_ROOMS: [],    // .악세알림켜기 명령어로 등록된, 악세 알림을 받을 방 목록
-    ACC_ALERT_THRESHOLDS: { "목걸이": {}, "반지": {} } // 악세별·기준별 기준가
+    ACC_ALERT_THRESHOLDS: { "목걸이": {}, "반지": {}, "귀걸이": {} } // 악세별·기준별 기준가
 };
 
 // [설정] 게임 데이터 JSON 디렉토리 (레포 data/ 폴더의 파일을 기기에 복사해서 사용)
@@ -330,6 +330,7 @@ function checkMarketAlerts() {
 const ACC_ALERT_NEAR_RATIO = 1.1;        // 일반 기준: 기준가 × 이 비율 이하면 알림
 const ACC_ALERT_SPECIAL_RATIO = 1.3;     // 특수 기준(무공+480/최생6500): 더 느슨한 비율
 const ACC_ALERT_MAX_PAGES = 10;          // 알림 체크 시 가격 ASC로 수집할 최대 페이지 수
+const ACC_ZERO_SEARCH_MAX_PAGES = 4;     // 거래횟수 0회 매물 탐색에만 적용하는 페이지 상한
 const ACC_ZERO_TRADE_DISCOUNT = 200000;  // 거래횟수 0회 매물에 자동 적용하는 기준가 할인액
 
 // 상상 악세 감시 정의. opt1/opt2 = 고정된 두 상옵(EtcOptions 필터용).
@@ -338,6 +339,9 @@ const ACC_ZERO_TRADE_DISCOUNT = 200000;  // 거래횟수 0회 매물에 자동 �
 //   연마효과:  FirstOption=7, SecondOption=54(무공+고정)/55(최생), MinValue=하한
 // criteria.apiQuality = API ItemGradeQuality 값 (기본 67)
 // criteria.special    = true이면 무공+/최생 두 번 요청 후 OR 병합
+// criteria.cgsaengMax = 최생 상한(등급별로 딱 떨어진 값만 잡을 때 사용. 상6500/중3250/하1300)
+// zeroTradeDiscount   = 거래횟수 0회 매물에 적용할 할인액 (없으면 ACC_ZERO_TRADE_DISCOUNT)
+// zeroTradeStrict     = true이면 0회 매물은 근접 비율 없이 '할인 기준가 이하'일 때만 알림
 const ACC_ALERT_ITEMS = [
     {
         key: "목걸이",
@@ -351,6 +355,21 @@ const ACC_ALERT_ITEMS = [
             { key: "최생",   label: "메인스탯 16300↑ + 최생3250↑", statMin: 16300, cgsaeng: 3250, apiOpt: { "FirstOption": 7, "SecondOption": 55, "MinValue": 3250, "MaxValue": 6500 } },
             { key: "품질",   label: "품질 90↑", quality: 90, apiQuality: 90 },
             { key: "특수",   label: "무공+480↑ / 최생6500↑", mugong: 480, cgsaeng: 6500, special: true }
+        ]
+    },
+    {
+        key: "귀걸이",
+        label: "무공%+무공+ 귀걸이 (상상)",
+        category: 200020,
+        opt1: 46, v1: 300,
+        opt2: 54, v2: 960,
+        zeroTradeDiscount: 50000,
+        zeroTradeStrict: true,
+        criteria: [
+            { key: "일반",   label: "옵션 조합만·3옵션 무관" },
+            { key: "최생상", label: "최생 6500", cgsaeng: 6500, cgsaengMax: 6500, apiOpt: { "FirstOption": 7, "SecondOption": 55, "MinValue": 6500, "MaxValue": 6500 } },
+            { key: "최생중", label: "최생 3250", cgsaeng: 3250, cgsaengMax: 3250, apiOpt: { "FirstOption": 7, "SecondOption": 55, "MinValue": 3250, "MaxValue": 3250 } },
+            { key: "최생하", label: "최생 1300", cgsaeng: 1300, cgsaengMax: 1300, apiOpt: { "FirstOption": 7, "SecondOption": 55, "MinValue": 1300, "MaxValue": 1300 } }
         ]
     },
     {
@@ -517,11 +536,12 @@ function accHasMugong(item, minV) {
 }
 
 /**
- * @description 매물에 최대 생명력 연마옵션이 minV 이상으로 붙어있는지 확인합니다.
+ * @description 매물에 최대 생명력 연마옵션이 minV 이상(maxV가 있으면 maxV 이하)으로 붙어있는지 확인합니다.
  */
-function accHasCgsaeng(item, minV) {
+function accHasCgsaeng(item, minV, maxV) {
     return item.Options.some(o =>
-        o.OptionName && o.OptionName.indexOf("최대 생명력") >= 0 && o.Value >= minV
+        o.OptionName && o.OptionName.indexOf("최대 생명력") >= 0
+        && o.Value >= minV && (maxV === undefined || o.Value <= maxV)
     );
 }
 
@@ -536,10 +556,10 @@ function matchesAccCriterion(item, c) {
         return item.GradeQuality >= c.quality;
     }
     const stat = accStatValue(item);
-    if (stat < c.statMin) return false;
+    if (c.statMin !== undefined && stat < c.statMin) return false;
     if (c.mugong !== undefined) return accHasMugong(item, c.mugong);
-    if (c.cgsaeng !== undefined) return accHasCgsaeng(item, c.cgsaeng);
-    return true; // 풀스탯: 메인스탯 범위만 확인
+    if (c.cgsaeng !== undefined) return accHasCgsaeng(item, c.cgsaeng, c.cgsaengMax);
+    return true; // 풀스탯: 메인스탯 범위만 확인 / 귀걸이 일반: 고정 상옵 2개만 확인
 }
 
 /**
@@ -550,6 +570,14 @@ function accDetailLine(item) {
         .filter(o => o.Type === "ACCESSORY_UPGRADE")
         .map(o => o.IsValuePercentage ? `${o.OptionName.trim()} ${o.Value}%` : `${o.OptionName.trim()} ${o.Value}`);
     return `품질 ${item.GradeQuality} | 힘민지 ${accStatValue(item)}\n${ups.join(", ")}`;
+}
+
+/**
+ * @description 감시 중인 악세 키 목록 문자열 (안내 메시지용)
+ * @returns {string}
+ */
+function accKeyListStr() {
+    return ACC_ALERT_ITEMS.map(i => i.key).join(", ");
 }
 
 /**
@@ -581,16 +609,23 @@ function checkAccAlerts() {
 
                 const ratio = c.special ? ACC_ALERT_SPECIAL_RATIO : ACC_ALERT_NEAR_RATIO;
                 const ceil = th * ratio;
-                const thZero = th - ACC_ZERO_TRADE_DISCOUNT;
-                const ceilZero = thZero * ratio;
+                const zeroDiscount = item.zeroTradeDiscount !== undefined ? item.zeroTradeDiscount : ACC_ZERO_TRADE_DISCOUNT;
+                const thZero = th - zeroDiscount;
+                const ceilZero = item.zeroTradeStrict ? thZero : thZero * ratio;
 
                 let bestTrade = null;
                 let bestZero = null;
+                // 매물은 가격 ASC이므로 ceilZero를 넘어가면 bestZero는 더 나올 수 없음
+                let zeroSearchDone = thZero <= 0;
 
                 // 특수는 fetchAccItemsByCrit 내부에서 두 번 요청하므로 페이지 1만 사용
                 const maxPages = c.special ? 1 : ACC_ALERT_MAX_PAGES;
 
                 for (let page = 1; page <= maxPages; page++) {
+                    // bestTrade는 보통 1페이지에서 확정되므로 2페이지 이후는 사실상 0회 탐색 비용
+                    if (page > ACC_ZERO_SEARCH_MAX_PAGES) zeroSearchDone = true;
+                    if (bestTrade && zeroSearchDone) break;
+
                     const result = fetchAccItemsByCrit(item, c, page);
                     if (!result.ok || result.items.length === 0) break;
 
@@ -600,15 +635,15 @@ function checkAccAlerts() {
                         const trade = it.AuctionInfo.TradeAllowCount;
 
                         if (price > ceil) { exceeded = true; break; }
+                        if (price > ceilZero) zeroSearchDone = true;
 
                         if (!bestTrade && trade >= 1 && matchesAccCriterion(it, c)) bestTrade = it;
-                        if (!bestZero && trade === 0 && thZero > 0 && price <= ceilZero && matchesAccCriterion(it, c)) bestZero = it;
+                        if (!bestZero && !zeroSearchDone && trade === 0 && matchesAccCriterion(it, c)) bestZero = it;
 
-                        if (bestTrade && bestZero) { exceeded = true; break; }
+                        if (bestTrade && (bestZero || zeroSearchDone)) { exceeded = true; break; }
                     }
 
                     if (exceeded || result.items.length < 10) break;
-                    if (bestTrade && bestZero) break;
                 }
 
                 if (bestTrade) {
@@ -631,7 +666,7 @@ function checkAccAlerts() {
                     if (!state || state.endDate !== endDate) {
                         const price = bestZero.AuctionInfo.BuyPrice;
                         const statusText = price <= thZero ? "기준가 이하" : "기준가 근접";
-                        const message = `📢 [악세 알림] ${statusText} (거래 0회)\n${item.label}\n[기준] ${c.label}\n기준가: ${formatNumber(thZero)} (설정값 -20만)\n현재가: ${formatNumber(price)}\n${accDetailLine(bestZero)}`;
+                        const message = `📢 [악세 알림] ${statusText} (거래 0회)\n${item.label}\n[기준] ${c.label}\n기준가: ${formatNumber(thZero)} (설정값 -${formatNumber(zeroDiscount)})\n현재가: ${formatNumber(price)}\n${accDetailLine(bestZero)}`;
                         sendToAlertRooms(message, config.ACC_ALERT_ROOMS);
                         accAlertState[stateKey] = { endDate };
                     }
@@ -841,12 +876,14 @@ bot.addListener(Event.MESSAGE, (msg) => {
             ".상상 / .상중 / .중중 등\n" +
             "  (상/중/하 또는 ㅅ/ㅈ/ㅎ 두 글자)\n" +
             ".악세 — 상상 악세 현재 매물 조회\n" +
-            ".악세 <목걸이|반지> <기준> — 기준별 필터 조회\n" +
+            ".악세 <목걸이|귀걸이|반지> <기준> — 기준별 필터 조회\n" +
             "\n[상상 악세 알림]\n" +
             ".악세알림켜기 / .악세알림끄기\n" +
-            ".기준 <목걸이|반지> <기준> <가격>\n" +
-            "  기준: 풀스탯/무공/최생/품질/특수\n" +
+            ".기준 <목걸이|귀걸이|반지> <기준> <가격>\n" +
+            "  목걸이·반지: 풀스탯/무공/최생/품질/특수\n" +
+            "  귀걸이: 일반/최생상/최생중/최생하\n" +
             "  예) .기준 반지 풀스탯 230만\n" +
+            ".기준확인 — 악세별 기준·기준가 현황\n" +
             "\n[경매장 시세 알림]\n" +
             ".시세알림켜기 / .시세알림끄기"
         );
@@ -1198,7 +1235,7 @@ bot.addListener(Event.MESSAGE, (msg) => {
             if (accKeyArg && accCritArg) {
                 const accItem = ACC_ALERT_ITEMS.find(i => i.key === accKeyArg);
                 if (!accItem) {
-                    msg.reply("⚠️ 알 수 없는 악세 키워드입니다. (목걸이, 반지)");
+                    msg.reply(`⚠️ 알 수 없는 악세 키워드입니다. (${accKeyListStr()})`);
                     return;
                 }
                 const crit = accItem.criteria.find(c => c.key === accCritArg);
@@ -1247,7 +1284,7 @@ bot.addListener(Event.MESSAGE, (msg) => {
                     const keys = accItem.criteria.map(c => c.key).join(", ");
                     msg.reply(`⚠️ 기준을 함께 입력해주세요.\n예) .악세 ${accKeyArg} 풀스탯\n기준: ${keys}`);
                 } else {
-                    msg.reply("⚠️ 알 수 없는 악세 키워드입니다. (목걸이, 반지)");
+                    msg.reply(`⚠️ 알 수 없는 악세 키워드입니다. (${accKeyListStr()})`);
                 }
                 return;
             }
@@ -1359,12 +1396,12 @@ bot.addListener(Event.MESSAGE, (msg) => {
         logCommand(msg, "악세 기준가 설정", `${keyArg || ""} ${critArg || ""} ${priceArg || ""}`);
         try {
             if (!keyArg || !critArg || !priceArg) {
-                msg.reply("⚠️ 사용법: .기준 <목걸이|반지> <풀스탯|무공|최생|품질|특수> <가격>\n예: .기준 반지 풀스탯 230만");
+                msg.reply(`⚠️ 사용법: .기준 <${ACC_ALERT_ITEMS.map(i => i.key).join("|")}> <기준> <가격>\n예: .기준 반지 풀스탯 230만\n악세별 기준 목록은 .기준확인 으로 볼 수 있습니다.`);
                 return;
             }
             const targetItem = ACC_ALERT_ITEMS.find(i => i.key === keyArg);
             if (!targetItem) {
-                msg.reply(`⚠️ 알 수 없는 악세 키워드입니다. (목걸이, 반지)`);
+                msg.reply(`⚠️ 알 수 없는 악세 키워드입니다. (${accKeyListStr()})`);
                 return;
             }
             const crit = targetItem.criteria.find(c => c.key === critArg);
