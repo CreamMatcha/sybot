@@ -367,8 +367,7 @@ const ACC_ALERT_ITEMS = [
         zeroTradeStrict: true,
         criteria: [
             { key: "일반",   label: "옵션 조합만·3옵션 무관" },
-            { key: "최생상", label: "최생 6500", cgsaeng: 6500, cgsaengMax: 6500, apiOpt: { "FirstOption": 7, "SecondOption": 55, "MinValue": 6500, "MaxValue": 6500 } },
-            { key: "최생중", label: "최생 3250", cgsaeng: 3250, cgsaengMax: 3250, apiOpt: { "FirstOption": 7, "SecondOption": 55, "MinValue": 3250, "MaxValue": 3250 } },
+            { key: "풀스탯", label: "메인스탯 13500↑", statMin: 13500, apiOpt: { "FirstOption": 1, "SecondOption": 11, "MinValue": 13500 } },
             { key: "최생하", label: "최생 1300", cgsaeng: 1300, cgsaengMax: 1300, apiOpt: { "FirstOption": 7, "SecondOption": 55, "MinValue": 1300, "MaxValue": 1300 } }
         ]
     },
@@ -881,7 +880,7 @@ bot.addListener(Event.MESSAGE, (msg) => {
             ".악세알림켜기 / .악세알림끄기\n" +
             ".기준 <목걸이|귀걸이|반지> <기준> <가격>\n" +
             "  목걸이·반지: 풀스탯/무공/최생/품질/특수\n" +
-            "  귀걸이: 일반/최생상/최생중/최생하\n" +
+            "  귀걸이: 일반/풀스탯/최생하\n" +
             "  예) .기준 반지 풀스탯 230만\n" +
             ".기준확인 — 악세별 기준·기준가 현황\n" +
             "\n[경매장 시세 알림]\n" +
