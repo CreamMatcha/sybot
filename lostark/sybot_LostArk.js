@@ -1651,6 +1651,7 @@ function fetchEquipmentSummary(charNameRaw) {
         var lineText = it.Name || "";
         var quality = null;
         var itemLevel = null;
+        var grade = it.Grade || null;
 
         try {
             var tooltip = JSON.parse(it.Tooltip);
@@ -1662,7 +1663,8 @@ function fetchEquipmentSummary(charNameRaw) {
             // 품질(qualityValue) / 아이템 레벨(leftStr2: "아이템 레벨 1800 (티어 4)")
             var itemTitleVal = findTooltipElementValueByType(tooltip, "ItemTitle");
             if (itemTitleVal) {
-                if (itemTitleVal.qualityValue != null) quality = itemTitleVal.qualityValue;
+                // 완갑처럼 품질 개념이 없는 부위는 qualityValue가 -1로 내려옴 → 품질 없음 처리
+                if (itemTitleVal.qualityValue != null && itemTitleVal.qualityValue >= 0) quality = itemTitleVal.qualityValue;
                 if (itemTitleVal.leftStr2) {
                     var mLv = stripHtml(itemTitleVal.leftStr2).match(/아이템\s*레벨\s*([0-9,]+)/);
                     if (mLv) itemLevel = mLv[1].replace(/,/g, "");
@@ -1672,7 +1674,7 @@ function fetchEquipmentSummary(charNameRaw) {
             Log.e("[LOA] 장비 Tooltip 파싱 실패 (" + it.Name + "): " + e);
         }
 
-        items.push({ type: it.Type, text: lineText, quality: quality, itemLevel: itemLevel });
+        items.push({ type: it.Type, text: lineText, quality: quality, itemLevel: itemLevel, grade: grade });
     }
 
     if (items.length === 0) return { ok: false, reason: "NO_EQUIP" };
@@ -1720,9 +1722,11 @@ function renderEquipmentView(model) {
     var out = [nameLine + "의 장비", "> 평균 품질: " + avgQuality, ""];
     for (var j = 0; j < model.items.length; j++) {
         var it = model.items[j];
-        var lv = (it.itemLevel != null) ? it.itemLevel : "?";
-        var qq = (it.quality != null) ? it.quality : "?";
-        out.push(getEquipDisplayName(it, model.className) + "(" + lv + ") : " + qq);
+        // 완갑은 아이템 레벨이 없으므로 괄호 안에 등급(Grade)을 대신 표시
+        var paren = (it.itemLevel != null) ? it.itemLevel : ((it.grade != null) ? it.grade : "?");
+        var line = getEquipDisplayName(it, model.className) + "(" + paren + ")";
+        if (it.quality != null) line += " : " + it.quality;
+        out.push(line);
     }
     return out.join("\n");
 }
