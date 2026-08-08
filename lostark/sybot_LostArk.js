@@ -1696,8 +1696,10 @@ var EQUIP_TYPE_DISPLAY_NAME = { "투구": "투구", "어깨": "견갑", "상의"
 
 // 무기는 클래스별 무기 기본명(classes.json의 weapon) 매칭 우선 — 마지막 단어 파싱이 부정확한 경우가 많음.
 // 매칭 실패 시 기존 마지막 단어 파싱 방식으로 폴백. 방어구는 슬롯 고정 명칭.
-function getEquipDisplayName(it, className) {
+// enhanceWidth: 강화단계 표기 폭. 지정 시 짧은 쪽 뒤에 공백을 덧대 부위명 시작 위치를 맞춤.
+function getEquipDisplayName(it, className, enhanceWidth) {
     var enhance = String(it.text).trim().split(/\s+/)[0];
+    while (enhance.length < enhanceWidth) enhance += " ";
 
     if (it.type === "무기") {
         var classes = (loadGameData("classes.json") || {}).classes || {};
@@ -1718,13 +1720,20 @@ function renderEquipmentView(model) {
     }
     var avgQuality = qualityCount ? (Math.round((sumQuality / qualityCount) * 10) / 10).toFixed(1) : "?";
 
+    // 강화단계 자릿수가 섞이면(+21 / +1) 짧은 쪽을 공백으로 채워 부위명을 세로로 정렬
+    var enhanceWidth = 0;
+    for (var k = 0; k < model.items.length; k++) {
+        var eLen = String(model.items[k].text).trim().split(/\s+/)[0].length;
+        if (eLen > enhanceWidth) enhanceWidth = eLen;
+    }
+
     var nameLine = model.name + (model.charLevel ? "(" + model.charLevel + ")" : "");
     var out = [nameLine + "의 장비", "> 평균 품질: " + avgQuality, ""];
     for (var j = 0; j < model.items.length; j++) {
         var it = model.items[j];
         // 완갑은 아이템 레벨이 없으므로 괄호 안에 등급(Grade)을 대신 표시
         var paren = (it.itemLevel != null) ? it.itemLevel : ((it.grade != null) ? it.grade : "?");
-        var line = getEquipDisplayName(it, model.className) + "(" + paren + ")";
+        var line = getEquipDisplayName(it, model.className, enhanceWidth) + "(" + paren + ")";
         if (it.quality != null) line += " : " + it.quality;
         out.push(line);
     }
