@@ -1609,9 +1609,9 @@ function fetchAccessories(charNameRaw) {
 }
 
 // ==========================================
-// 장비창 조회 (무기/투구/어깨/상의/하의/장갑) - .장비
+// 장비창 조회 (무기/투구/어깨/상의/하의/장갑/완갑) - .장비
 // ==========================================
-var EQUIP_TYPE_ORDER = { "무기": 1, "투구": 2, "어깨": 3, "상의": 4, "하의": 5, "장갑": 6 };
+var EQUIP_TYPE_ORDER = { "무기": 1, "투구": 2, "어깨": 3, "상의": 4, "하의": 5, "장갑": 6, "완갑": 7 };
 
 // Tooltip JSON에서 지정한 type(NameTagBox, ItemTitle 등)을 가진 Element의 value를 반환
 function findTooltipElementValueByType(tipObj, typeName) {
@@ -1690,7 +1690,7 @@ function simplifyEquipName(text) {
 }
 
 // 방어구는 실제 아이템명과 무관하게 슬롯 기준 고정 명칭 사용
-var EQUIP_TYPE_DISPLAY_NAME = { "투구": "투구", "어깨": "견갑", "상의": "상의", "하의": "하의", "장갑": "장갑" };
+var EQUIP_TYPE_DISPLAY_NAME = { "투구": "투구", "어깨": "견갑", "상의": "상의", "하의": "하의", "장갑": "장갑", "완갑": "완갑" };
 
 // 무기는 클래스별 무기 기본명(classes.json의 weapon) 매칭 우선 — 마지막 단어 파싱이 부정확한 경우가 많음.
 // 매칭 실패 시 기존 마지막 단어 파싱 방식으로 폴백. 방어구는 슬롯 고정 명칭.
