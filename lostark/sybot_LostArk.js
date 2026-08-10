@@ -237,6 +237,57 @@ function httpGetUtf8(urlStr, headersObj) {
     }
 }
 
+// 경매장(/auctions/items)처럼 POST + JSON 바디가 필요한 API용
+// (이 스크립트에는 Jsoup 전역 import가 없으므로 java.net으로 직접 요청)
+function httpPostJsonUtf8(urlStr, headersObj, bodyObj) {
+    var conn = null;
+    var osw = null;
+    var br = null;
+    try {
+        var url = new java.net.URL(urlStr);
+        conn = url.openConnection();
+        conn.setRequestMethod("POST");
+        conn.setConnectTimeout(8000);
+        conn.setReadTimeout(8000);
+        conn.setRequestProperty("accept", "application/json");
+        conn.setRequestProperty("Content-Type", "application/json");
+        conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Sybot_MessengerBot)");
+
+        if (headersObj) {
+            for (var k in headersObj) {
+                if (Object.prototype.hasOwnProperty.call(headersObj, k)) {
+                    conn.setRequestProperty(String(k), String(headersObj[k]));
+                }
+            }
+        }
+
+        conn.setDoOutput(true);
+        osw = new java.io.OutputStreamWriter(conn.getOutputStream(), "UTF-8");
+        osw.write(JSON.stringify(bodyObj || {}));
+        osw.flush();
+
+        var code = conn.getResponseCode();
+        var isOK = (code >= 200 && code < 300);
+        var stream = isOK ? conn.getInputStream() : conn.getErrorStream();
+
+        if (stream == null) return { ok: false, code: code, text: null };
+
+        br = new java.io.BufferedReader(new java.io.InputStreamReader(stream, "UTF-8"));
+        var sb = new java.lang.StringBuilder();
+        var line;
+        while ((line = br.readLine()) !== null) sb.append(line).append('\n');
+
+        return { ok: isOK, code: code, text: String(sb.toString()) };
+    } catch (e) {
+        Log.e("[LOA] httpPostJsonUtf8 ERROR: " + e);
+        return { ok: false, code: -1, text: null, err: String(e) };
+    } finally {
+        if (osw != null) try { osw.close(); } catch (e) { }
+        if (br != null) try { br.close(); } catch (e) { }
+        if (conn != null) try { conn.disconnect(); } catch (e) { }
+    }
+}
+
 // 숫자/숫자문자열을 "1,234,567" 형태로 변환 (음수/소수점 대응)
 function formatThousandsSafe(x) {
     try {
@@ -1035,6 +1086,257 @@ function renderGemsView(model) {
     return out.join("\n");
 }
 
+// ==========================================
+// 원정대 보석 현황 (.보석현황 / .ㅂㅅㅎㅎ)
+// 주력 서버 캐릭터의 보석을 모아 귀속이 아닌 것만 경매장 최저 즉구가로 합산
+// ==========================================
+
+// 보석 종류 정의
+//  word      : 보석 이름에 들어가는 글자
+//  priceWord : 경매장 검색에 쓸 이름 (null이면 그 자체로는 매물이 없는 보석)
+//  order     : 캐릭터별 요약에서의 표기 순서
+var ROSTER_GEM_TYPES = [
+    { word: "겁화", key: "겁", priceWord: "겁화", tier: 4, order: 0 },
+    { word: "작열", key: "작", priceWord: "작열", tier: 4, order: 1 },
+    { word: "광휘", key: "광", priceWord: null, tier: 4, order: 4 },
+    { word: "멸화", key: "멸", priceWord: "멸화", tier: 3, order: 5 },
+    { word: "홍염", key: "홍", priceWord: "홍염", tier: 3, order: 6 }
+];
+
+// 카카오톡이 긴 메시지를 "전체보기"로 접는 기준 글자 수
+var KAKAO_FOLD_LIMIT = 500;
+
+/**
+ * 보석 1개에서 레벨/종류/귀속 여부와 시세 기준을 뽑아낸다.
+ * @param {object} gem   Gems[i]
+ * @param {object} skill 같은 슬롯의 Effects.Skills[i] (광휘 판별용, 없어도 됨)
+ */
+function parseRosterGem(gem, skill) {
+    var plainName = stripHtml(gem && gem.Name);
+
+    var base = null;
+    for (var i = 0; i < ROSTER_GEM_TYPES.length; i++) {
+        if (plainName.indexOf(ROSTER_GEM_TYPES[i].word) !== -1) { base = ROSTER_GEM_TYPES[i]; break; }
+    }
+
+    var lv = parseInt(gem && gem.Level, 10);
+    if (isNaN(lv)) lv = 0;
+
+    // 귀속 보석은 이름 끝에 "(귀속)"이 붙는다. 그 외에는 전부 경매장에 올릴 수 있음
+    var meta = {
+        lv: lv,
+        bound: plainName.indexOf("(귀속)") !== -1,
+        key: base ? base.key : "?",
+        order: base ? base.order : 99,
+        priceWord: base ? base.priceWord : null,
+        tier: base ? base.tier : 4
+    };
+
+    // 광휘 보석은 경매장 매물이 없지만, 옵션 변경 무료 상태일 뿐 언제든 일반 보석으로
+    // 되돌릴 수 있으므로 효과에 맞는 일반 보석 시세로 계산한다.
+    //  피해/지원 효과 "증가" = 겁화 / 재사용 대기시간 "감소" = 작열
+    if (base && base.word === "광휘") {
+        var desc = (skill && skill.Description && skill.Description.length) ? String(skill.Description[0]) : "";
+        if (desc.indexOf("증가") !== -1) { meta.key = "광겁"; meta.order = 2; meta.priceWord = "겁화"; }
+        else if (desc.indexOf("감소") !== -1) { meta.key = "광작"; meta.order = 3; meta.priceWord = "작열"; }
+    }
+
+    meta.label = lv + meta.key;
+    return meta;
+}
+
+/**
+ * 보석 1종의 경매장 최저 즉구가를 조회한다. (같은 종류는 cache로 1회만 호출)
+ * @returns {number|null} 매물이 없거나 조회 실패면 null
+ */
+function fetchGemMinPrice(lv, priceWord, tier, cache) {
+    var key = lv + priceWord;
+    if (Object.prototype.hasOwnProperty.call(cache, key)) return cache[key];
+
+    var res = httpPostJsonUtf8(
+        LOSTARK_BASE + "/auctions/items",
+        { "authorization": "bearer " + config.LOSTARK_API_KEY },
+        {
+            "Sort": "BUY_PRICE",
+            "CategoryCode": 210000,
+            "ItemTier": tier,
+            "ItemName": lv + "레벨 " + priceWord,
+            "PageNo": 1,
+            "SortCondition": "ASC"
+        }
+    );
+
+    var price = null;
+    if (res.ok) {
+        try {
+            var items = (JSON.parse(res.text || "{}") || {}).Items || [];
+            if (items.length && items[0].AuctionInfo) price = items[0].AuctionInfo.BuyPrice;
+        } catch (e) {
+            Log.e("[LOA] GemPrice JSON parse error: " + e);
+        }
+    } else {
+        Log.e("[LOA] GemPrice HTTP FAIL code=" + res.code + " item=" + key);
+    }
+
+    cache[key] = price;
+    return price;
+}
+
+/**
+ * 주력 서버(= 조회한 캐릭터가 있는 서버) 캐릭터의 보석을 모아 캐릭터별로 집계한다.
+ * @returns {{ok:true, name:string, server:string, chars:object[], totalGold:number, tradableCount:number, boundCount:number}|{ok:false, reason:string}}
+ */
+function fetchRosterGems(charNameRaw) {
+    var charName = String(charNameRaw).trim();
+
+    var sib = fetchSiblingsRaw(charName);
+    if (!sib.ok) return { ok: false, reason: sib.reason };
+
+    // 원정대는 서버를 넘나들지만, 주력 서버 캐릭터만 집계한다
+    var targetChar = null;
+    for (var t = 0; t < sib.data.length; t++) {
+        if (sib.data[t].CharacterName === charName) { targetChar = sib.data[t]; break; }
+    }
+    var targetServer = targetChar ? targetChar.ServerName : sib.data[0].ServerName;
+
+    var priceCache = {};
+    var chars = [];
+    var totalGold = 0, tradableCount = 0, boundCount = 0;
+
+    for (var i = 0; i < sib.data.length; i++) {
+        var c = sib.data[i];
+        if (c.ServerName !== targetServer) continue;
+
+        var res = fetchGems(c.CharacterName);
+        if (!res.ok) continue; // 보석 미착용/조회 실패 캐릭터는 집계에서 제외
+
+        // 광휘 보석 판별에 쓸 스킬 효과를 슬롯 기준으로 맵핑
+        var skillBySlot = {};
+        var skills = (res.Effects && res.Effects.Skills) ? res.Effects.Skills : [];
+        for (var s = 0; s < skills.length; s++) {
+            if (skills[s] && skills[s].GemSlot != null) skillBySlot[String(skills[s].GemSlot)] = skills[s];
+        }
+
+        var buckets = [];  // [{label, lv, order, count}]
+        var byLabel = {};
+        var gold = 0, bound = 0;
+
+        for (var g = 0; g < res.Gems.length; g++) {
+            var gem = res.Gems[g];
+            var meta = parseRosterGem(gem, skillBySlot[String(gem.Slot)]);
+
+            if (meta.bound) { bound++; boundCount++; continue; }
+            tradableCount++;
+
+            if (!byLabel[meta.label]) {
+                byLabel[meta.label] = { label: meta.label, lv: meta.lv, order: meta.order, count: 0 };
+                buckets.push(byLabel[meta.label]);
+            }
+            byLabel[meta.label].count++;
+
+            if (meta.priceWord) {
+                var price = fetchGemMinPrice(meta.lv, meta.priceWord, meta.tier, priceCache);
+                if (price) gold += price;
+            }
+        }
+
+        // 레벨 높은 순 → 보석 종류 순(겁/작/광겁/광작/멸/홍)
+        buckets.sort(function (a, b) {
+            if (b.lv !== a.lv) return b.lv - a.lv;
+            return a.order - b.order;
+        });
+
+        totalGold += gold;
+        chars.push({
+            name: c.CharacterName,
+            level: c.ItemAvgLevel,
+            buckets: buckets,
+            gold: gold,
+            bound: bound
+        });
+    }
+
+    if (!chars.length) return { ok: false, reason: "NO_GEMS" };
+
+    return {
+        ok: true,
+        name: charName,
+        server: targetServer,
+        chars: chars,
+        totalGold: totalGold,
+        tradableCount: tradableCount,
+        boundCount: boundCount
+    };
+}
+
+// 아이템 레벨 문자열("1,792.50")을 숫자로 (정렬용)
+function parseItemLevelNumber(levelStr) {
+    var n = parseFloat(String(levelStr).replace(/,/g, ""));
+    return isNaN(n) ? 0 : n;
+}
+
+/**
+ * "▼ 더보기" 뒤에 제로폭 공백을 채워 넣어, 그 아래 내용을
+ * 카카오톡 "전체보기" 안으로 접어 넣는다.
+ */
+function foldPadding(visibleText) {
+    var pad = KAKAO_FOLD_LIMIT - visibleText.length;
+    return pad > 0 ? new Array(pad + 1).join("\u200B") : ""; // \u200B = 제로폭 공백
+}
+
+function renderRosterGemsView(model) {
+    // 골드 많은 순 → 아이템 레벨 높은 순
+    var priced = model.chars.filter(function (c) { return c.buckets.length > 0; })
+        .sort(function (a, b) {
+            if (b.gold !== a.gold) return b.gold - a.gold;
+            return parseItemLevelNumber(b.level) - parseItemLevelNumber(a.level);
+        });
+
+    // 귀속 보석만 낀 캐릭터는 접기 영역으로
+    var boundOnly = model.chars.filter(function (c) { return c.buckets.length === 0; })
+        .sort(function (a, b) { return parseItemLevelNumber(b.level) - parseItemLevelNumber(a.level); });
+
+    var out = [];
+    out.push("💎 " + model.name + "의 원정대 보석");
+    out.push("");
+    out.push("◦ 거래가능 " + model.tradableCount + "개 / 🔒 귀속 " + model.boundCount + "개");
+    out.push("◦ 총 시세 " + formatThousandsSafe(model.totalGold) + " G");
+    out.push("━━━━━━━━━━━━━━");
+
+    if (!priced.length) {
+        out.push("거래 가능한 보석이 없어요. (전부 귀속)");
+    }
+
+    for (var i = 0; i < priced.length; i++) {
+        var c = priced[i];
+        var parts = c.buckets.map(function (b) { return b.label + "(" + b.count + ")"; });
+        if (c.bound > 0) parts.push("🔒" + c.bound);
+
+        if (i > 0) out.push("");
+        out.push("◦ " + c.name + " [Lv. " + c.level + "]");
+        out.push(" • " + parts.join(" "));
+        out.push(" • " + formatThousandsSafe(c.gold) + " G");
+    }
+
+    out.push("━━━━━━━━━━━━━━");
+    out.push("귀속 보석 제외 / 경매장 최저 즉구가 기준");
+
+    if (boundOnly.length) {
+        out.push("");
+        out.push("▼ 귀속 보석만 착용한 캐릭터 (" + boundOnly.length + ")");
+
+        var visible = out.join("\n");
+        var hidden = ["--------------"];
+        for (var j = 0; j < boundOnly.length; j++) {
+            var bc = boundOnly[j];
+            hidden.push("◦ " + bc.name + " [Lv. " + bc.level + "] ➜ 🔒" + bc.bound + "개");
+        }
+        return visible + foldPadding(visible) + "\n" + hidden.join("\n");
+    }
+
+    return out.join("\n");
+}
+
 function renderArkGridView(model) {
     // model: { Nickname, ClassName, Slots:[], Effects:[] }
     var head = "◦ " + (model.Nickname || model.name || "") + "(" + (model.ClassName || "미확인") + ")의 아크그리드";
@@ -1113,10 +1415,11 @@ function loadRaidRewards() {
 }
 
 /**
- * 캐릭터의 원정대(부캐) 목록을 가져와서 정렬하는 함수
+ * 캐릭터의 원정대(부캐) 목록 원본 배열을 가져오는 함수
+ * @returns {{ok:true, data:object[]}|{ok:false, reason:string, detail?:string}}
  */
-const fetchSiblings = (characterName) => {
-    const cleanName = characterName.trim();
+function fetchSiblingsRaw(characterName) {
+    const cleanName = String(characterName).trim();
     const apiUrl = `${LOSTARK_BASE}/characters/${encodeURIComponent(cleanName)}/siblings`;
 
     try {
@@ -1145,8 +1448,26 @@ const fetchSiblings = (characterName) => {
         if (!responseData || responseData === "null") return { ok: false, reason: "NOT_FOUND" };
 
         const data = JSON.parse(responseData);
-        if (!Array.isArray(data)) return { ok: false, reason: "NOT_FOUND" };
+        if (!Array.isArray(data) || !data.length) return { ok: false, reason: "NOT_FOUND" };
 
+        return { ok: true, data: data };
+    } catch (e) {
+        Log.e("[LOA] Error fetching siblings: " + e);
+        return { ok: false, reason: "SYSTEM_ERROR", detail: e.message };
+    }
+}
+
+/**
+ * 캐릭터의 원정대(부캐) 목록을 가져와서 정렬하는 함수
+ */
+const fetchSiblings = (characterName) => {
+    const cleanName = characterName.trim();
+
+    try {
+        const raw = fetchSiblingsRaw(cleanName);
+        if (!raw.ok) return raw;
+
+        const data = raw.data;
         const targetChar = data.find(c => c.CharacterName === cleanName);
         const targetServer = targetChar ? targetChar.ServerName : data[0].ServerName;
 
@@ -2039,6 +2360,31 @@ bot.addListener(Event.MESSAGE, function (msg) {
             }
         } catch (e) {
             handleApiError(msg, e, "보석 조회", charGem);
+        }
+        return;
+    }
+
+    // 원정대 보석 현황
+    var mRGEM = content.match(/^(?:\.보석현황|\.?ㅂㅅㅎㅎ)\s+(\S+)$/);
+    if (mRGEM) {
+        var charRGem = mRGEM[1];
+        logCommand(msg, "원정대 보석 조회", charRGem);
+
+        try {
+            var rRG = fetchRosterGems(charRGem);
+
+            if (rRG && rRG.ok) {
+                msg.reply(renderRosterGemsView(rRG));
+            } else {
+                var reasonRG = (rRG && rRG.reason) ? rRG.reason : "UNKNOWN";
+                if (reasonRG === "NO_GEMS") {
+                    msg.reply(charRGem + "님의 원정대에 보석을 착용한 캐릭터가 없어요.");
+                } else {
+                    handleApiError(msg, reasonRG, "원정대 보석 조회", charRGem);
+                }
+            }
+        } catch (e) {
+            handleApiError(msg, e, "원정대 보석 조회", charRGem);
         }
         return;
     }
