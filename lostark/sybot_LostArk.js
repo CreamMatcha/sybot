@@ -1313,7 +1313,7 @@ function renderRosterGemsView(model) {
         if (c.bound > 0) parts.push("🔒" + c.bound);
 
         if (i > 0) out.push("");
-        out.push("◦ " + c.name + " [Lv. " + c.level + "]");
+        out.push("◦ " + c.name + " (" + c.level + ")");
         out.push(" • " + parts.join(" "));
         out.push(" • " + formatThousandsSafe(c.gold) + " G");
     }
@@ -1329,7 +1329,7 @@ function renderRosterGemsView(model) {
         var hidden = ["--------------"];
         for (var j = 0; j < boundOnly.length; j++) {
             var bc = boundOnly[j];
-            hidden.push("◦ " + bc.name + " [Lv. " + bc.level + "] ➜ 🔒" + bc.bound + "개");
+            hidden.push("◦ " + bc.name + " (" + bc.level + ") ➜ 🔒" + bc.bound + "개");
         }
         return visible + foldPadding(visible) + "\n" + hidden.join("\n");
     }
