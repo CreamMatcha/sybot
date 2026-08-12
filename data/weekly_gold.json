@@ -1,11 +1,21 @@
 {
   "version": 2,
-  "patchDate": "2026-06-24",
+  "patchDate": "2026-08-05",
   "tiers": [
     {
+      "minLevel": 1780,
+      "maxTotal": { "total": 179000, "tradeable": 129000, "combo": "성당3 + 세르카 나이트메어 + 벨가르딘 나이트메어" },
+      "maxTradeable": { "total": 177000, "tradeable": 177000, "combo": "종막 하드 + 세르카 나이트메어 + 벨가르딘 나이트메어" }
+    },
+    {
+      "minLevel": 1770,
+      "maxTotal": { "total": 166000, "tradeable": 116000, "combo": "성당3 + 세르카 나이트메어 + 벨가르딘 하드" },
+      "maxTradeable": { "total": 164000, "tradeable": 164000, "combo": "종막 하드 + 세르카 나이트메어 + 벨가르딘 하드" }
+    },
+    {
       "minLevel": 1750,
-      "maxTotal": { "total": 152000, "tradeable": 102000, "combo": "성당3 + 종막 하드 + 세르카 나이트메어" },
-      "maxTradeable": { "total": 140000, "tradeable": 140000, "combo": "4막 하드 + 종막 하드 + 세르카 나이트메어" }
+      "maxTotal": { "total": 154000, "tradeable": 104000, "combo": "성당3 + 세르카 나이트메어 + 벨가르딘 노말" },
+      "maxTradeable": { "total": 152000, "tradeable": 152000, "combo": "종막 하드 + 세르카 나이트메어 + 벨가르딘 노말" }
     },
     {
       "minLevel": 1740,

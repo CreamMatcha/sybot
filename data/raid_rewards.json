@@ -1,7 +1,14 @@
 {
   "version": 2,
-  "patchDate": "2026-06-24",
+  "patchDate": "2026-08-05",
   "raids": {
+    "벨가르딘": {
+      "difficulties": {
+        "노말": { "entryLevel": 1750, "gates": [20000, 30000] },
+        "하드": { "entryLevel": 1770, "gates": [25000, 37000] },
+        "나이트메어": { "entryLevel": 1780, "gates": [30000, 45000] }
+      }
+    },
     "지평의 성당": {
       "boundAll": true,
       "difficulties": {

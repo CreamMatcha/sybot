@@ -70,11 +70,11 @@
   - `engravings.json` (각인 줄임말), `classes.json` (직업별 abbr/weapon), `synergy.json`, `weekly_gold.json`, `guardian_rotation.json`, `raid_rewards.json` (레이드 클골)
   - 로드: 각 스크립트의 `loadGameData(fileName)` (safeReadJson + 파일별 캐시, init()에서 캐시 초기화)
   - 새 직업/각인 추가 시 JSON 한 곳만 수정하면 됨
-- **골드 귀속 규칙** (raid_rewards.json v2 / weekly_gold.json v2, 2026-06-24 패치 기준)
+- **골드 귀속 규칙** (raid_rewards.json v2 / weekly_gold.json v2, 2026-08-05 패치 기준)
   - 지평의 성당: 전액 귀속 (`boundAll: true` 플래그) / 도전레벨(`entryLevel`) 1730 미만 '노말' = 절반 귀속 / 하드·나이트메어 = 전액 유통
   - 새 레이드 추가 시 `entryLevel`과 관문별 `gates`만 넣으면 귀속 계산은 자동 (규칙: renderRaidBlock)
-  - weekly_gold.json은 구간별 `maxTotal`(총골드 최대 조합)/`maxTradeable`(유통골드 최대 조합) 값을 표에서 그대로 기입, 1710 이상만 제공
-  - 벨가르딘 출시(2026-08-05) 후: raid_rewards에 벨가르딘 추가(노말 1750/하드 1770/나메 1780) + weekly_gold를 "벨가르딘 포함" 표로 교체 필요
+  - weekly_gold.json은 구간별 `maxTotal`(총골드 최대 조합)/`maxTradeable`(유통골드 최대 조합) 값을 표에서 그대로 기입, 1710 이상만 제공 (현재 구간: 1710/1720/1730/1740/1750/1770/1780)
+  - 벨가르딘 반영 완료(2026-08-05 패치): 노말 1750 / 하드 1770 / 나메 1780, 2관문 레이드
 - **API 코드(옵션 코드, 카테고리 코드)가 섞인 데이터는 코드 상단 상수로 유지** (예: `WATCH_ITEMS`, `ACC_ALERT_ITEMS`, `ACC_PRICE_PAIRS` in sybot_LostArk_Market.js) — 핸들러 안에 데이터를 넣지 말 것
 
 ## 출력 메시지 스타일 규격 (봇 응답 텍스트 작성 시 준수)
