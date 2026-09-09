@@ -10,10 +10,10 @@
  * [명령어]
  * .출석          - 일일 지원금 2,000P + 랜덤 보너스
  * .지갑 / .포인트 - 내 정보 및 잔액 확인
- * .주사위 <금액>  - 조합형 게임 (일일 5회) | 퍼센트 베팅 지원 (예: .주사위 100ㅍ)
+ * .주사위 <금액>  - 조합형 게임 (일일 5회) | 퍼센트(100ㅍ)·단위(5T) 베팅 지원
  * .올인           - D100 도박 (하루 1회)
  * .랭킹           - 전체 랭킹
- * .보내기 <닉/순위> <금액>  - 퍼센트 송금 지원 (예: .보내기 닉네임 50ㅍ)
+ * .보내기 <닉/순위> <금액>  - 퍼센트(50ㅍ)·단위(5T) 송금 지원
  * .상점           - 포인트 상점 목록
  * .구매 <아이템명> - 아이템 구매 및 즉시 사용
  * .칭호           - 내 보유 칭호 확인
@@ -463,6 +463,74 @@ function init() {
 
 /* ==================== 유틸리티 ==================== */
 
+// [포인트 표기] 1,000 단위로 끊어 접미사를 붙이고 유효숫자 3자리로 보여준다.
+//   1234 -> 1.23K / 97291001660702 -> 97.3T / 3.83e20 -> 383Qi
+// 사다리를 다 쓰면 aa, ab, ac ... 로 무한 확장하므로 포인트가 아무리 커져도 표기가 깨지지 않는다.
+const POINT_UNITS = ["", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc"];
+
+function pointUnit(step) {
+    if (step < POINT_UNITS.length) return POINT_UNITS[step];
+    const i = step - POINT_UNITS.length;
+    return String.fromCharCode(97 + Math.floor(i / 26)) + String.fromCharCode(97 + (i % 26));
+}
+
+/**
+ * 포인트를 표시용 문자열로 변환한다. (1,000 미만은 그대로)
+ * @param {number} value
+ * @returns {string} 예) "742", "1.23K", "85.5Qi"
+ */
+function fmtP(value) {
+    let n = Number(value);
+    if (isNaN(n)) return "0";
+    const sign = n < 0 ? "-" : "";
+    n = Math.abs(n);
+    if (!isFinite(n)) return sign + "∞";
+    if (n < 1000) return sign + String(Math.floor(n));
+
+    let step = 0;
+    while (n >= 1000) { n /= 1000; step++; }
+
+    // 반올림 결과가 자릿수 구간을 넘길 수 있어(9.999 -> 10.00) 반올림 후 한 번 더 맞춘다.
+    const digits = n < 10 ? 2 : (n < 100 ? 1 : 0);
+    let text = n.toFixed(digits);
+    if (Number(text) >= 1000) { text = "1.00"; step++; }
+    else if (Number(text) >= Math.pow(10, 3 - digits)) text = Number(text).toFixed(digits - 1);
+    return sign + text + pointUnit(step);
+}
+
+/**
+ * 단위 문자열을 1,000의 거듭제곱 지수로 바꾼다. (pointUnit 의 역함수)
+ * 대소문자를 가리지 않고, 뒤에 붙은 포인트 표시 "P"도 받아준다. ("QiP" -> Qi)
+ * @returns {number} 모르는 단위면 -1
+ */
+function unitStep(unit) {
+    const u = String(unit).toLowerCase();
+    if (u === "") return 0;
+    for (let i = 0; i < POINT_UNITS.length; i++) {
+        if (POINT_UNITS[i].toLowerCase() === u) return i;
+    }
+    if (u.charAt(u.length - 1) === "p") {
+        const base = unitStep(u.substring(0, u.length - 1));
+        if (base >= 0) return base;
+    }
+    if (/^[a-z][a-z]$/.test(u)) {
+        return POINT_UNITS.length + (u.charCodeAt(0) - 97) * 26 + (u.charCodeAt(1) - 97);
+    }
+    return -1;
+}
+
+/**
+ * 단위가 붙은 포인트 입력을 숫자로 바꾼다. ("1000", "1.5K", "8.17Qi", "85.5QiP")
+ * @returns {number} 해석할 수 없으면 NaN
+ */
+function parsePointAmount(raw) {
+    const m = String(raw).trim().match(/^(\d+(?:\.\d+)?)([A-Za-z]*)$/);
+    if (!m) return NaN;
+    const step = unitStep(m[2]);
+    if (step < 0) return NaN;
+    return Math.floor(parseFloat(m[1]) * Math.pow(1000, step));
+}
+
 const rollD6 = () => Math.floor(Math.random() * 6) + 1;
 const rollD100 = () => Math.floor(Math.random() * 100) + 1;
 
@@ -488,7 +556,7 @@ function parseBetAmount(raw, points) {
         return result;
     }
 
-    result.bet = parseInt(raw, 10);
+    result.bet = parsePointAmount(raw);
     return result;
 }
 
@@ -752,12 +820,12 @@ function handleMessage(msg) {
                 }
 
                 if (user.points < price) {
-                    reply(`[💸 포인트 부족]\n필요: ${price.toLocaleString()}P (보유 ${item.pct}%)\n보유: ${user.points.toLocaleString()}P`);
+                    reply(`[💸 포인트 부족]\n필요: ${fmtP(price)}P (보유 ${item.pct}%)\n보유: ${fmtP(user.points)}P`);
                     return;
                 }
 
                 user.points -= price;
-                const priceStr = `${price.toLocaleString()}P (보유 ${item.pct}%)`;
+                const priceStr = `${fmtP(price)}P (보유 ${item.pct}%)`;
 
                 if (rawItem === "추첨권") {
                     const mult = pickWeighted(LOTTERY_TABLE);
@@ -767,7 +835,7 @@ function handleMessage(msg) {
                     const net = gain - price;
                     if (net > user.bestSingleGain) user.bestSingleGain = net;
                     const head = mult === 0 ? "💥 꽝..." : (mult >= 50 ? `🎊 잭팟 ${mult}배!!!` : `${mult}배!`);
-                    reply(`🎟️ 추첨 결과: ${head}\n구매가: ${priceStr}\n순이익 ${net >= 0 ? "+" : ""}${net.toLocaleString()}P\n잔액: ${user.points.toLocaleString()}P`);
+                    reply(`🎟️ 추첨 결과: ${head}\n구매가: ${priceStr}\n순이익 ${net >= 0 ? "+" : ""}${fmtP(net)}P\n잔액: ${fmtP(user.points)}P`);
                 }
                 else if (rawItem === "프리미엄추첨권") {
                     const mult = pickWeighted(PREMIUM_LOTTERY_TABLE);
@@ -776,7 +844,7 @@ function handleMessage(msg) {
                     updateMaxPoints();
                     const net = gain - price;
                     if (net > user.bestSingleGain) user.bestSingleGain = net;
-                    reply(`💎 프리미엄 추첨: ${mult}배!\n구매가: ${priceStr}\n순이익 ${net >= 0 ? "+" : ""}${net.toLocaleString()}P\n잔액: ${user.points.toLocaleString()}P`);
+                    reply(`💎 프리미엄 추첨: ${mult}배!\n구매가: ${priceStr}\n순이익 ${net >= 0 ? "+" : ""}${fmtP(net)}P\n잔액: ${fmtP(user.points)}P`);
                 }
                 else if (rawItem === "주사위추가") {
                     if (!isToday(user.lastDice)) {
@@ -786,7 +854,7 @@ function handleMessage(msg) {
                     user.diceBonus = (user.diceBonus || 0) + 1;
                     user.lastDice = now;
                     const newMax = 5 + user.diceBonus;
-                    reply(`🎲 주사위 기회 1회 추가! (오늘 최대 ${newMax}회)\n구매가: ${priceStr}\n잔액: ${user.points.toLocaleString()}P`);
+                    reply(`🎲 주사위 기회 1회 추가! (오늘 최대 ${newMax}회)\n구매가: ${priceStr}\n잔액: ${fmtP(user.points)}P`);
                 }
                 else if (rawItem === "올인보험") {
                     if (user.insurance) {
@@ -795,7 +863,7 @@ function handleMessage(msg) {
                         return;
                     }
                     user.insurance = true;
-                    reply(`🛡️ 올인 보험 적용!\n다음 올인 실패 시 손실액의 50%를 돌려받습니다.\n구매가: ${priceStr}\n잔액: ${user.points.toLocaleString()}P`);
+                    reply(`🛡️ 올인 보험 적용!\n다음 올인 실패 시 손실액의 50%를 돌려받습니다.\n구매가: ${priceStr}\n잔액: ${fmtP(user.points)}P`);
                 }
                 else if (rawItem === "복권") {
                     // 가격의 0.2 ~ 1.8배 균등 랜덤 (기대값 = 가격 × 1.0)
@@ -804,7 +872,7 @@ function handleMessage(msg) {
                     updateMaxPoints();
                     const net = prize - price;
                     if (net > user.bestSingleGain) user.bestSingleGain = net;
-                    reply(`🎫 복권 결과: ${prize.toLocaleString()}P 당첨!\n구매가: ${priceStr}\n순이익 ${net >= 0 ? "+" : ""}${net.toLocaleString()}P\n잔액: ${user.points.toLocaleString()}P`);
+                    reply(`🎫 복권 결과: ${fmtP(prize)}P 당첨!\n구매가: ${priceStr}\n순이익 ${net >= 0 ? "+" : ""}${fmtP(net)}P\n잔액: ${fmtP(user.points)}P`);
                 }
                 else if (rawItem === "슬롯머신") {
                     const result = runSlotMachine();
@@ -813,8 +881,8 @@ function handleMessage(msg) {
                     updateMaxPoints();
                     const net = gain - price;
                     if (net > user.bestSingleGain) user.bestSingleGain = net;
-                    const netStr = (net >= 0 ? "+" : "") + net.toLocaleString() + "P";
-                    reply(`🎰 슬롯머신\n[ ${result.s.join(" | ")} ]\n${result.desc} (x${result.mult})\n구매가: ${priceStr}\n순이익 ${netStr}\n잔액: ${user.points.toLocaleString()}P`);
+                    const netStr = (net >= 0 ? "+" : "") + fmtP(net) + "P";
+                    reply(`🎰 슬롯머신\n[ ${result.s.join(" | ")} ]\n${result.desc} (x${result.mult})\n구매가: ${priceStr}\n순이익 ${netStr}\n잔액: ${fmtP(user.points)}P`);
                 }
 
                 user.shopHistory[rawItem] = now;
@@ -874,7 +942,7 @@ function handleMessage(msg) {
                     user.lastDaily = now;
                     updateMaxPoints();
                     checkAndGrantTitles(user, reply);
-                    reply(`[💰 출석 완료]\n기본 2,000P + 보너스 ${bonus.toLocaleString()}P!\n잔액: ${user.points.toLocaleString()}P`);
+                    reply(`[💰 출석 완료]\n기본 2,000P + 보너스 ${fmtP(bonus)}P!\n잔액: ${fmtP(user.points)}P`);
                 } else {
                     reply(`[⏳ 출석 대기]\n오늘 이미 출석하셨습니다.\n자정까지: ${getTimeUntilMidnight()}`);
                 }
@@ -887,8 +955,8 @@ function handleMessage(msg) {
                 const titleLine = user.activeTitle ? `\n칭호: ${user.activeTitle}` : "";
                 reply(
                     `[🏦 ${name}님의 지갑]${titleLine}\n` +
-                    `보유: ${user.points.toLocaleString()}P\n` +
-                    `최고 기록: ${(user.maxPoints || 0).toLocaleString()}P\n` +
+                    `보유: ${fmtP(user.points)}P\n` +
+                    `최고 기록: ${fmtP(user.maxPoints || 0)}P\n` +
                     `누적 플레이: ${user.playCount}회\n` +
                     `올인 연속 실패: ${user.allInCritFails}/3회\n` +
                     `올인 보험: ${user.insurance ? "✅ 적용 중" : "❌ 없음"}`
@@ -917,14 +985,14 @@ function handleMessage(msg) {
                 const bet = betInfo.bet;
                 if (isNaN(bet) || bet <= 0) {
                     if (betInfo.isPercent) {
-                        reply(`[💸 잔액 부족] 보유 포인트가 부족해 ${betInfo.pct}%로 베팅할 수 없습니다.\n보유: ${user.points.toLocaleString()}P`);
+                        reply(`[💸 잔액 부족] 보유 포인트가 부족해 ${betInfo.pct}%로 베팅할 수 없습니다.\n보유: ${fmtP(user.points)}P`);
                     } else {
-                        reply(`[⚠️ 사용법] .주사위 <금액> 또는 .주사위 <퍼센트>ㅍ\n예) .주사위 1000 / .주사위 100ㅍ`);
+                        reply(`[⚠️ 사용법] .주사위 <금액> 또는 .주사위 <퍼센트>ㅍ\n예) .주사위 1000 / .주사위 100ㅍ / .주사위 5T`);
                     }
                     return;
                 }
                 if (user.points < bet) {
-                    reply(`[💸 잔액 부족] 보유: ${user.points.toLocaleString()}P`);
+                    reply(`[💸 잔액 부족] 보유: ${fmtP(user.points)}P`);
                     return;
                 }
 
@@ -956,17 +1024,17 @@ function handleMessage(msg) {
                 updateMaxPoints();
 
                 const resultText = mult >= 1
-                    ? `+${win.toLocaleString()}P`
-                    : `-${(bet - win).toLocaleString()}P`;
+                    ? `+${fmtP(win)}P`
+                    : `-${fmtP(bet - win)}P`;
 
                 const betLine = betInfo.isPercent
-                    ? `베팅: ${bet.toLocaleString()}P (보유의 ${betInfo.pct}%)\n`
+                    ? `베팅: ${fmtP(bet)}P (보유의 ${betInfo.pct}%)\n`
                     : "";
 
                 checkAndGrantTitles(user, reply);
                 reply(
                     `[🎲 ${d.join(", ")}]\n${betLine}${desc}\n${resultText}\n` +
-                    `잔액: ${user.points.toLocaleString()}P (오늘 ${user.diceCountToday}/${maxDice}회)`
+                    `잔액: ${fmtP(user.points)}P (오늘 ${user.diceCountToday}/${maxDice}회)`
                 );
                 break;
             }
@@ -1006,7 +1074,7 @@ function handleMessage(msg) {
                     if (user.insurance) {
                         const refund = Math.floor(amount * 0.5);
                         gain += refund;
-                        status += `\n🛡️ 올인 보험 발동! +${refund.toLocaleString()}P 환급`;
+                        status += `\n🛡️ 올인 보험 발동! +${fmtP(refund)}P 환급`;
                         user.insurance = false;
                     }
 
@@ -1024,10 +1092,10 @@ function handleMessage(msg) {
                         let relief = 0;
                         if (isJackpot) {
                             relief = Math.floor(Math.random() * 40001) + 10000;
-                            status += `\n\n🍀 [기적의 동아줄!] 지나가던 거부가 ${relief.toLocaleString()}P 적선!`;
+                            status += `\n\n🍀 [기적의 동아줄!] 지나가던 거부가 ${fmtP(relief)}P 적선!`;
                         } else {
                             relief = Math.floor(Math.random() * 901) + 100;
-                            status += `\n\n🪙 [파산 구제금] 길바닥에서 ${relief.toLocaleString()}P 발견...`;
+                            status += `\n\n🪙 [파산 구제금] 길바닥에서 ${fmtP(relief)}P 발견...`;
                         }
                         gain += relief;
                     }
@@ -1059,7 +1127,7 @@ function handleMessage(msg) {
 
                 reply(
                     `[⚠️ ALL-IN: ${luck}]\n` +
-                    `배팅: ${amount.toLocaleString()}P\n${status}\n잔액: ${user.points.toLocaleString()}P`
+                    `배팅: ${fmtP(amount)}P\n${status}\n잔액: ${fmtP(user.points)}P`
                 );
                 break;
             }
@@ -1081,10 +1149,10 @@ function handleMessage(msg) {
 
                     if (u.title) {
                         // 칭호가 있는 유저: 닉네임 후 줄바꿈 -> 약간의 들여쓰기 -> [칭호] 포인트
-                        view += `${icon} ${u.name}\n   └ ${u.title} | ${u.pts.toLocaleString()}P\n`;
+                        view += `${icon} ${u.name}\n   └ ${u.title} | ${fmtP(u.pts)}P\n`;
                     } else {
                         // 칭호가 없는 유저: 기존처럼 한 줄에 표시
-                        view += `${icon} ${u.name}: ${u.pts.toLocaleString()}P\n`;
+                        view += `${icon} ${u.name}: ${fmtP(u.pts)}P\n`;
                     }
                 });
 
@@ -1112,16 +1180,16 @@ function handleMessage(msg) {
                 );
                 if (!match) {
                     if (cmd === "보내기")
-                        reply(`[⚠️ 사용법] .보내기 <닉네임/순위> <금액 또는 퍼센트>\n예) .보내기 닉네임 1000 / .보내기 닉네임 50ㅍ\n* 닉네임에 띄어쓰기가 있으면 "홍 길동"으로 감싸주세요.`);
+                        reply(`[⚠️ 사용법] .보내기 <닉네임/순위> <금액 또는 퍼센트>\n예) .보내기 닉네임 1000 / .보내기 닉네임 50ㅍ / .보내기 닉네임 5T\n* 닉네임에 띄어쓰기가 있으면 "홍 길동"으로 감싸주세요.`);
                     else
-                        reply(`[⚠️ 사용법]\n.지급 <닉/순위> <금액>\n.주사위추가 <닉/순위> <횟수>\n.주사위초기화 <닉/순위>\n.올인초기화 <닉/순위>`);
+                        reply(`[⚠️ 사용법]\n.지급 <닉/순위> <금액>  (예: 5T, 1.5Qi)\n.주사위추가 <닉/순위> <횟수>\n.주사위초기화 <닉/순위>\n.올인초기화 <닉/순위>`);
                     return;
                 }
 
                 const exactCmd = match[1];
                 const targetStr = match[2] || match[3];
                 const rawNum = match[4];
-                const numValue = rawNum ? parseInt(rawNum, 10) : NaN;
+                const numValue = rawNum ? parsePointAmount(rawNum) : NaN;
                 Log.i(`[DiceGame][${traceId}] TARGET_REQUEST exactCmd=${exactCmd}, rawTarget=${targetStr}, rawNum=${rawNum || ""}, numValue=${isNaN(numValue) ? "NaN" : numValue}`);
                 const targetResult = resolveTargetUser(db, targetStr);
                 if (targetResult.error) {
@@ -1140,14 +1208,14 @@ function handleMessage(msg) {
                         const sendValue = sendInfo.bet;
                         if (isNaN(sendValue) || sendValue <= 0) {
                             if (sendInfo.isPercent) {
-                                reply(`[💸 잔액 부족] 보유 포인트가 부족해 ${sendInfo.pct}%를 보낼 수 없습니다.\n보유: ${user.points.toLocaleString()}P`);
+                                reply(`[💸 잔액 부족] 보유 포인트가 부족해 ${sendInfo.pct}%를 보낼 수 없습니다.\n보유: ${fmtP(user.points)}P`);
                             } else {
-                                reply(`[⚠️] 금액을 1P 이상 입력해주세요.\n예) .보내기 닉네임 1000 / .보내기 닉네임 50ㅍ`);
+                                reply(`[⚠️] 금액을 1P 이상 입력해주세요.\n예) .보내기 닉네임 1000 / .보내기 닉네임 50ㅍ / .보내기 닉네임 5T`);
                             }
                             return;
                         }
                         if (targetResult.hash === hash) { reply(`[⚠️] 자기 자신에게는 송금할 수 없습니다.`); return; }
-                        if (user.points < sendValue) { reply(`[💸 잔액 부족] 보유: ${user.points.toLocaleString()}P`); return; }
+                        if (user.points < sendValue) { reply(`[💸 잔액 부족] 보유: ${fmtP(user.points)}P`); return; }
 
                         const fee = Math.floor(sendValue * 0.05); // 수수료 5% 계산
                         const sendAmount = sendValue - fee;       // 실제 보낼 금액
@@ -1156,7 +1224,7 @@ function handleMessage(msg) {
                         targetUser.points += sendAmount;
 
                         const pctNote = sendInfo.isPercent ? ` (보유의 ${sendInfo.pct}%)` : "";
-                        reply(`[💸 송금 완료]\n${name} → ${targetUser.name}: ${sendAmount.toLocaleString()}P${pctNote} (수수료 ${fee.toLocaleString()}P 차감)\n(내 잔액: ${user.points.toLocaleString()}P)`);
+                        reply(`[💸 송금 완료]\n${name} → ${targetUser.name}: ${fmtP(sendAmount)}P${pctNote} (수수료 ${fmtP(fee)}P 차감)\n(내 잔액: ${fmtP(user.points)}P)`);
                         break;
                     }
                     case "지급":
@@ -1164,7 +1232,7 @@ function handleMessage(msg) {
                         appendAuditLog(`[${new Date().toISOString()}][${traceId}] admin=${name}/${hash}, cmd=${exactCmd}, target=${targetUser.name}/${targetResult.hash}, value=${numValue}`);
                         backupUserData(getAdminBackupReason(exactCmd));
                         targetUser.points += numValue;
-                        reply(`[✅ 지급] ${targetUser.name}에게 ${numValue.toLocaleString()}P\n(대상 잔액: ${targetUser.points.toLocaleString()}P)`);
+                        reply(`[✅ 지급] ${targetUser.name}에게 ${fmtP(numValue)}P\n(대상 잔액: ${fmtP(targetUser.points)}P)`);
                         break;
                     case "주사위추가":
                         if (isNaN(numValue) || numValue <= 0) { reply(`[⚠️] 횟수를 입력해주세요.`); return; }
