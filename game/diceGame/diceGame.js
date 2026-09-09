@@ -478,10 +478,11 @@ function init() {
 
 /* ==================== 유틸리티 ==================== */
 
-// [포인트 표기] 1,000 단위로 끊어 접미사를 붙이고 유효숫자 3자리로 보여준다.
-//   1234 -> 1.23K / 97291001660702 -> 97.3T / 3.83e20 -> 383Qi
+// [포인트 표기] 1,000 단위로 끊어 접미사를 붙이고 유효숫자 6자리로 보여준다.
+//   1234 -> 1.23400K / 97291001660702 -> 97.2910T / 3.83e20 -> 382.663Qi
 // 사다리를 다 쓰면 aa, ab, ac ... 로 무한 확장하므로 포인트가 아무리 커져도 표기가 깨지지 않는다.
 const POINT_UNITS = ["", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc"];
+const POINT_DISPLAY_DIGITS = 6;
 
 function pointUnit(step) {
     if (step < POINT_UNITS.length) return POINT_UNITS[step];
@@ -492,7 +493,7 @@ function pointUnit(step) {
 /**
  * 포인트를 표시용 문자열로 변환한다. (1,000 미만은 그대로)
  * @param {number} value
- * @returns {string} 예) "742", "1.23K", "85.5Qi"
+ * @returns {string} 예) "742", "1.23400K", "85.4516Qi"
  */
 function fmtP(value) {
     let n = Number(value);
@@ -505,11 +506,11 @@ function fmtP(value) {
     let step = 0;
     while (n >= 1000) { n /= 1000; step++; }
 
-    // 반올림 결과가 자릿수 구간을 넘길 수 있어(9.999 -> 10.00) 반올림 후 한 번 더 맞춘다.
-    const digits = n < 10 ? 2 : (n < 100 ? 1 : 0);
-    let text = n.toFixed(digits);
-    if (Number(text) >= 1000) { text = "1.00"; step++; }
-    else if (Number(text) >= Math.pow(10, 3 - digits)) text = Number(text).toFixed(digits - 1);
+    // 반올림 결과가 자릿수 구간을 넘길 수 있어(9.99999 -> 10.00000) 반올림 후 한 번 더 맞춘다.
+    const intDigits = n < 10 ? 1 : (n < 100 ? 2 : 3);
+    let text = n.toFixed(POINT_DISPLAY_DIGITS - intDigits);
+    if (Number(text) >= 1000) { text = (1).toFixed(POINT_DISPLAY_DIGITS - 1); step++; }
+    else if (Number(text) >= Math.pow(10, intDigits)) text = Number(text).toFixed(POINT_DISPLAY_DIGITS - intDigits - 1);
     return sign + text + pointUnit(step);
 }
 
