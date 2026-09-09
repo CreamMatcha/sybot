@@ -273,6 +273,19 @@ function normalizeNumber(value, fallback) {
     return isNaN(n) ? fallback : n;
 }
 
+// [포인트 정밀도] Number 는 유효숫자 약 16자리까지만 정확해서, 9,007조(MAX_SAFE_INTEGER)를
+// 넘어서면 연산할 때마다 맨 아랫자리에 오차가 섞인다. 저장 직전에 유효숫자 15자리로 반올림해
+// 그 오차를 흡수한다. 반올림 폭이 오차보다 크므로 결과는 항상 '정확한 값을 반올림한 값'이 된다.
+// MAX_SAFE_INTEGER 미만(정수가 정확히 표현되는 구간)은 값이 그대로 유지된다.
+const POINT_SIG_DIGITS = 15;
+
+function roundPoints(value) {
+    const n = Number(value);
+    if (isNaN(n) || !isFinite(n)) return n;
+    if (Math.abs(n) < Number.MAX_SAFE_INTEGER) return Math.round(n);
+    return Number(n.toPrecision(POINT_SIG_DIGITS));
+}
+
 function normalizeUserData(data, traceId) {
     if (!data || typeof data !== "object") {
         logW(`[DiceGame][${traceId}] DATA_INVALID_ROOT -> reset empty db`);
@@ -298,7 +311,7 @@ function normalizeUserData(data, traceId) {
             return;
         }
         if (typeof u.name !== "string" || u.name.trim() === "") u.name = "unknown";
-        u.points = normalizeNumber(u.points, INITIAL_POINTS);
+        u.points = roundPoints(normalizeNumber(u.points, INITIAL_POINTS));
         u.lastDaily = normalizeNumber(u.lastDaily, 0);
         u.playCount = normalizeNumber(u.playCount, 0);
         u.lastDice = normalizeNumber(u.lastDice, 0);
@@ -309,8 +322,10 @@ function normalizeUserData(data, traceId) {
         u.totalCritFails = normalizeNumber(u.totalCritFails, 0);
         u.tripleCount = normalizeNumber(u.tripleCount, 0);
         u.critSuccessCount = normalizeNumber(u.critSuccessCount, 0);
-        u.bestSingleGain = normalizeNumber(u.bestSingleGain, 0);
-        u.maxPoints = normalizeNumber(u.maxPoints, u.points);
+        u.bestSingleGain = roundPoints(normalizeNumber(u.bestSingleGain, 0));
+        u.maxPoints = roundPoints(normalizeNumber(u.maxPoints, u.points));
+        // 송금 수신·관리자 지급 경로에는 최고 기록 갱신이 없어 maxPoints 가 points 보다 작아질 수 있다.
+        if (u.maxPoints < u.points) u.maxPoints = u.points;
         u.insurance = !!u.insurance;
         if (!Array.isArray(u.earnedTitles)) u.earnedTitles = [];
         if (typeof u.activeTitle !== "string") u.activeTitle = "";
