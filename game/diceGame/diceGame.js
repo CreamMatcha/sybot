@@ -568,7 +568,9 @@ function parseBetAmount(raw, points) {
             result.error = `[⚠️ 사용법] 퍼센트는 1~100 사이로 입력해주세요.\n예) 50ㅍ / 100ㅍ`;
             return result;
         }
-        result.bet = Math.floor(points * result.pct / 100);
+        // points 가 MAX_SAFE_INTEGER 를 넘으면 points*pct/100 이 보유액보다 커질 수 있다.
+        // (100ㅍ 인데 잔액 부족으로 막히는 문제) 퍼센트 베팅은 보유액을 넘을 수 없으므로 잘라낸다.
+        result.bet = Math.min(points, Math.floor(points * result.pct / 100));
         return result;
     }
 
