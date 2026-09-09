@@ -50,6 +50,17 @@ const INITIAL_POINTS = 100000;
 const recentLogIds = [];
 const MAX_LOG_CACHE_SIZE = 50;
 
+// [런타임 호환] 일부 MessengerBot 빌드에는 Log.w 가 없어 호출 즉시 예외가 발생한다.
+const HAS_LOG_W = (typeof Log !== "undefined" && typeof Log.w === "function");
+function logW(text) {
+    if (HAS_LOG_W) Log.w(text);
+    else Log.i(`[WARN] ${text}`);
+}
+
+// [닉네임 캐시] 해시 → 최신 닉네임. 방의 모든 메시지에서 갱신되며 파일 I/O가 없다.
+// 게임 명령어를 쓰지 않은 유저의 닉네임 변경도 랭킹/송금 등에 바로 반영하기 위한 용도.
+const nameCache = {};
+
 /* ==================== 상점 아이템 정의 ==================== */
 // 가격은 "보유 포인트의 pct%"로 동적 계산 (구매 시점 기준), 단 minPrice 이하로는 내려가지 않음.
 // 배율형 아이템(추첨권/프리미엄/슬롯/복권)의 보상은 모두 동적 가격에 비례하므로
@@ -264,7 +275,7 @@ function normalizeNumber(value, fallback) {
 
 function normalizeUserData(data, traceId) {
     if (!data || typeof data !== "object") {
-        Log.w(`[DiceGame][${traceId}] DATA_INVALID_ROOT -> reset empty db`);
+        logW(`[DiceGame][${traceId}] DATA_INVALID_ROOT -> reset empty db`);
         return createEmptyUserData();
     }
 
@@ -282,7 +293,7 @@ function normalizeUserData(data, traceId) {
     getUserHashes(data).forEach(h => {
         const u = data[h];
         if (!u || typeof u !== "object") {
-            Log.w(`[DiceGame][${traceId}] USER_INVALID hash=${h} -> delete`);
+            logW(`[DiceGame][${traceId}] USER_INVALID hash=${h} -> delete`);
             delete data[h];
             return;
         }
@@ -327,7 +338,7 @@ function logDuplicateNames(db, traceId) {
     });
     Object.keys(nameMap).forEach(n => {
         if (nameMap[n].length > 1) {
-            Log.w(`[DiceGame][${traceId}] DUP_NAME name=${n}, hashes=${nameMap[n].join(",")}`);
+            logW(`[DiceGame][${traceId}] DUP_NAME name=${n}, hashes=${nameMap[n].join(",")}`);
         }
     });
 }
@@ -382,7 +393,7 @@ function backupUserData(reason) {
             const parsed = raw && raw.trim() !== "" ? JSON.parse(String(raw)) : {};
             count = getUserHashes(parsed).length;
         } catch (parseErr) {
-            Log.w(`[DiceGame][BACKUP] parse warning reason=${reason}: ${parseErr.message}`);
+            logW(`[DiceGame][BACKUP] parse warning reason=${reason}: ${parseErr.message}`);
         }
         Log.i(`[DiceGame][BACKUP] saved reason=${reason}, path=${backupPath}, users=${count}, bytes=${raw ? String(raw).length : 0}`);
         cleanupOldBackups();
@@ -523,15 +534,38 @@ function resolveTargetUser(db, targetStr) {
 
 /* ==================== 유저 데이터 초기화/보완 ==================== */
 
-function ensureUserFields(u, name, traceId, hash) {
+/**
+ * 닉네임을 최신값으로 갱신하고 이전 닉네임을 nameHistory 에 기록한다.
+ * 유저의 신원은 해시이며 닉네임은 표시용이므로, 언제든 바뀔 수 있다고 보고 처리한다.
+ */
+function applyName(u, name, traceId, hash) {
+    if (!name) return;
+    if (!Array.isArray(u.nameHistory)) u.nameHistory = [];
     if (u.name !== undefined && u.name !== name) {
-        Log.w(`[DiceGame][${traceId}] NAME_CHANGE hash=${hash}, old=${u.name}, new=${name}`);
-        if (!Array.isArray(u.nameHistory)) u.nameHistory = [];
+        logW(`[DiceGame][${traceId}] NAME_CHANGE hash=${hash}, old=${u.name}, new=${name}`);
         if (u.nameHistory.indexOf(u.name) === -1) u.nameHistory.push(u.name);
     }
     u.name = name;
-    if (!Array.isArray(u.nameHistory)) u.nameHistory = [];
     if (u.nameHistory.indexOf(name) === -1) u.nameHistory.push(name);
+}
+
+/** 방에서 받은 메시지의 발신자 닉네임을 캐시에 기록한다. (해시 없으면 무시) */
+function rememberName(msg) {
+    const hash = msg.author.hash;
+    const name = msg.author.name;
+    if (!hash || !name) return;
+    nameCache[hash] = name;
+}
+
+/** 캐시에 쌓인 최신 닉네임을 DB에 반영한다. (게임을 안 한 유저도 새 닉으로 표시됨) */
+function applyNameCache(db, traceId) {
+    Object.keys(nameCache).forEach(h => {
+        if (db[h]) applyName(db[h], nameCache[h], traceId, h);
+    });
+}
+
+function ensureUserFields(u, name, traceId, hash) {
+    applyName(u, name, traceId, hash);
     u.lastSeenAt = Date.now();
     if (u.lastDice === undefined) u.lastDice = 0;
     if (u.diceCountToday === undefined) u.diceCountToday = 0;
@@ -596,6 +630,7 @@ function runSlotMachine() {
 
 function onMessage(msg) {
     if (!ALLOWED_ROOMS.includes(msg.room)) return;
+    rememberName(msg);
     if (!msg.content.startsWith(PREFIX)) return;
 
     // [수정됨] 카카오톡 고유 메시지 ID(logId)를 활용한 중복 알림 방지 필터링
@@ -617,6 +652,7 @@ function onMessage(msg) {
         handleMessage(msg);
     } catch (e) {
         Log.e(`[DiceGame][LOCK_ERROR] ${e.message}\n${e.stack}`);
+        msg.reply(`[beta]\n[❌ 시스템 오류] ${e.message}`);
     } finally {
         mainLock.unlock();
     }
@@ -647,6 +683,7 @@ function handleMessage(msg) {
     const hash = msg.author.hash;
     const name = msg.author.name;
     Log.i(`[DiceGame][${traceId}] IN room=${msg.room}, name=${name}, hash=${hash}, rawCmd=${args[0]}, cmd=${cmd}, content=${msg.content}, users=${getUserHashes(db).length}, lockQueue=${mainLock.getQueueLength()}`);
+    applyNameCache(db, traceId);
     logDuplicateNames(db, traceId);
 
     if (!db[hash]) {
@@ -1088,7 +1125,7 @@ function handleMessage(msg) {
                 Log.i(`[DiceGame][${traceId}] TARGET_REQUEST exactCmd=${exactCmd}, rawTarget=${targetStr}, rawNum=${rawNum || ""}, numValue=${isNaN(numValue) ? "NaN" : numValue}`);
                 const targetResult = resolveTargetUser(db, targetStr);
                 if (targetResult.error) {
-                    Log.w(`[DiceGame][${traceId}] TARGET_ERROR rawTarget=${targetStr}, error=${targetResult.error}`);
+                    logW(`[DiceGame][${traceId}] TARGET_ERROR rawTarget=${targetStr}, error=${targetResult.error}`);
                     reply(targetResult.error);
                     return;
                 }
@@ -1169,7 +1206,7 @@ function handleMessage(msg) {
             saveUserData(db);
             Log.i(`[DiceGame][${traceId}] SAVE_DONE current=${name}/${hash}`);
         } else {
-            Log.w(`[DiceGame][${traceId}] SAVE_SKIPPED current=${name}/${hash}, reason=not_completed`);
+            logW(`[DiceGame][${traceId}] SAVE_SKIPPED current=${name}/${hash}, reason=not_completed`);
         }
     }
 }
