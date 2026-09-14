@@ -362,19 +362,20 @@ bot.addListener(Event.MESSAGE, (msg) => {
 
                 const html = doc.html();
 
-                // 1. 스펙 포인트, 티어, 아이템 레벨 추출 (알려주신 클래스 기준)
-                // 해당 클래스를 가진 모든 span 태그를 찾습니다.
-                const specElements = doc.select("span.GroupProfile_specLevel__aOZcs");
+                // 1. 스펙 포인트, 티어, 아이템 레벨 추출 (CharacterProfileCard 구조 기준)
+                // 클래스명 뒤 해시(__xxxx)는 빌드마다 바뀔 수 있어 접두사로 매칭합니다.
+                const scoreElement = doc.select("dd[class*=CharacterProfileCard_score__]").first();
+                const levelElement = doc.select("dd[class*=CharacterProfileCard_itemLevel__]").first();
+                const tierElement = doc.select("dd[class*=CharacterProfileCard_tier__]").first();
 
-                if (specElements.size() < 3) {
+                if (scoreElement == null || levelElement == null || tierElement == null) {
                     msg.reply("❌ 데이터를 파싱할 수 없습니다. 캐릭터 이름을 확인해주세요.");
                     return;
                 }
 
-                const itemLevel = specElements.get(0).text().trim();      // 1777.5
-                const score = specElements.get(1).text().trim();   // 6859.57
-                const tierElement = specElements.get(2); // 두 번째 GroupProfile_specLevel__aOZcs
-                const tierName = tierElement.text().trim(); // "에스더"
+                const itemLevel = levelElement.text().trim();  // 1,805.00
+                const score = scoreElement.text().trim();      // 9700.13
+                const tierName = tierElement.text().trim();    // "에스더"
 
                 // img 태그의 src 속성을 가져옵니다.
                 const tierImgTag = tierElement.select("img").first();
@@ -394,37 +395,29 @@ bot.addListener(Event.MESSAGE, (msg) => {
                     tierImgUrl = "https://cdnlopec.xyz/asset/image/" + getTierFileName(tierName);
                 }
 
-                // 2. 랭킹 정보 추출 (강력한 정규식 버전)
-                const rankElements = doc.select("span.GroupProfile_rank__zpZON");
+                // 2. 랭킹 정보 추출
+                // 구조: <dl class="CharacterProfileCard_facts__"><div><dt>전체 랭킹</dt><dd>157,799위 (67.19%)</dd></div>...
+                const factElements = doc.select("dl[class*=CharacterProfileCard_facts__] > div");
 
                 let totalRank = "-";
                 let totalPercent = "";
                 let classRank = "-";
                 let classPercent = "";
 
-                rankElements.forEach((el, index) => {
-                    // 1. HTML을 가져온 뒤 주석과 태그를 제거
-                    let rawHtml = el.html();
+                factElements.forEach((el) => {
+                    const label = String(el.select("dt").text()).replace(/\s+/g, "");
+                    const value = String(el.select("dd").text()).replace(/\s+/g, ""); // 예: "157,799위(67.19%)"
 
-                    // 주석 기호를 안전하게 제거 (특수기호 앞에 \를 붙여서 안전하게 처리)
-                    let cleanText = rawHtml
-                        .replace(/<\!-- -->/g, "") // 주석 제거
-                        .replace(/<[^>]*>?/gm, "")  // HTML 태그 제거
-                        .replace(/\s+/g, "");       // 공백 제거
-
-                    // 2. 숫자 추출 (랭킹과 퍼센트)
-                    // 예: "전체랭킹486위(5.27%)"
-                    let rankMatch = cleanText.match(/랭킹([\d,]+)위/);
-                    let percentMatch = cleanText.match(/\(([\d.]+)%\)/);
+                    let rankMatch = value.match(/([\d,]+)위/);
+                    let percentMatch = value.match(/\(([\d.]+)%\)/);
 
                     let rankVal = rankMatch ? rankMatch[1] : "-";
                     let percentVal = percentMatch ? percentMatch[1] : "";
 
-                    // 3. 텍스트 포함 여부로 데이터 분류
-                    if (cleanText.indexOf("전체랭킹") !== -1) {
+                    if (label === "전체랭킹") {
                         totalRank = rankVal + "위";
                         totalPercent = percentVal ? percentVal + "%" : "";
-                    } else if (cleanText.indexOf("직업랭킹") !== -1) {
+                    } else if (label === "직업랭킹") {
                         classRank = rankVal + "위";
                         classPercent = percentVal ? percentVal + "%" : "";
                     }
@@ -434,7 +427,8 @@ bot.addListener(Event.MESSAGE, (msg) => {
                 Log.i("최종 파싱 결과 -> 전체: " + totalRank + " / 직업: " + classRank);
 
                 // 3. 직업(className) 및 직업 각인(classtype) 추출
-                const tagElements = doc.select("div.GroupProfile_tagArea__12o2b span.GroupProfile_tag__tF05T");
+                // 구조: <div class="CharacterProfileCard_tags__"><span>서버</span><span>직업</span><span>직각</span><label>악추피</label></div>
+                const tagElements = doc.select("div[class*=CharacterProfileCard_tags__] > span");
 
                 let className = "-";
                 let classtype = "-";
