@@ -396,32 +396,30 @@ bot.addListener(Event.MESSAGE, (msg) => {
                 }
 
                 // 2. 랭킹 정보 추출
-                // 구조: <dl class="CharacterProfileCard_facts__"><div><dt>전체 랭킹</dt><dd>157,799위 (67.19%)</dd></div>...
-                const factElements = doc.select("dl[class*=CharacterProfileCard_facts__] > div");
-
+                // 정적 HTML의 <dd>는 "집계 중"으로만 나오므로, Next.js 스트리밍 데이터(self.__next_f.push)에서 추출합니다.
+                // 구조: \"profileSupplement\":{\"totalRank\":792,\"totalPercent\":0.34,\"classRank\":406,\"classPercent\":0.36,\"badge\":[]}
                 let totalRank = "-";
                 let totalPercent = "";
                 let classRank = "-";
                 let classPercent = "";
 
-                factElements.forEach((el) => {
-                    const label = String(el.select("dt").text()).replace(/\s+/g, "");
-                    const value = String(el.select("dd").text()).replace(/\s+/g, ""); // 예: "157,799위(67.19%)"
+                const supplementMatch = String(html).match(/profileSupplement\\?":\{([^}]*)\}/);
+                if (supplementMatch) {
+                    const sup = supplementMatch[1];
+                    const pick = (key) => {
+                        const m = sup.match(new RegExp(key + '\\\\?":([\\d.]+)'));
+                        return m ? m[1] : null;
+                    };
+                    const addComma = (n) => n.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
-                    let rankMatch = value.match(/([\d,]+)위/);
-                    let percentMatch = value.match(/\(([\d.]+)%\)/);
+                    const tr = pick("totalRank"), tp = pick("totalPercent");
+                    const cr = pick("classRank"), cp = pick("classPercent");
 
-                    let rankVal = rankMatch ? rankMatch[1] : "-";
-                    let percentVal = percentMatch ? percentMatch[1] : "";
-
-                    if (label === "전체랭킹") {
-                        totalRank = rankVal + "위";
-                        totalPercent = percentVal ? percentVal + "%" : "";
-                    } else if (label === "직업랭킹") {
-                        classRank = rankVal + "위";
-                        classPercent = percentVal ? percentVal + "%" : "";
-                    }
-                });
+                    if (tr) totalRank = addComma(tr) + "위";
+                    if (tp) totalPercent = Number(tp).toFixed(2) + "%";
+                    if (cr) classRank = addComma(cr) + "위";
+                    if (cp) classPercent = Number(cp).toFixed(2) + "%";
+                }
 
                 // 로그 확인
                 Log.i("최종 파싱 결과 -> 전체: " + totalRank + " / 직업: " + classRank);
